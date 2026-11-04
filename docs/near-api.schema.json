@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://worldzpayments.example/schemas/near-api-v1.json",
+  "title": "WorldzPayments NEAR API v1",
+  "type": "object",
+  "$defs": {
+    "NetworkId": { "type": "string", "enum": ["testnet", "mainnet"] },
+    "Amount": { "type": "string", "pattern": "^[0-9]+$", "description": "Unsigned base-unit integer string; never JSON floating point." },
+    "Asset": {
+      "oneOf": [
+        { "type": "object", "required": ["type"], "properties": { "type": { "const": "native" }, "symbol": { "const": "NEAR" }, "decimals": { "const": 24 } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "contractId", "symbol", "decimals"], "properties": { "type": { "const": "nep141" }, "contractId": { "type": "string" }, "symbol": { "type": "string" }, "decimals": { "type": "integer", "minimum": 0, "maximum": 255 } }, "additionalProperties": false }
+      ]
+    },
+    "SignedOrderAuthorization": {
+      "type": "object",
+      "required": ["protocolVersion", "signerKeyId", "networkId", "contractId", "merchantId", "merchantAccountId", "payoutAccountId", "orderId", "asset", "amount", "expiresAtSeconds", "feeBps", "feeRecipientAccountId", "expectedPayerAccountId", "nonce", "signature"],
+      "properties": {
+        "protocolVersion": { "const": 1 }, "signerKeyId": { "type": "string" }, "networkId": { "$ref": "#/$defs/NetworkId" },
+        "contractId": { "type": "string" }, "merchantId": { "type": "string" }, "merchantAccountId": { "type": "string" }, "payoutAccountId": { "type": "string" },
+        "orderId": { "type": "string" }, "asset": { "$ref": "#/$defs/Asset" }, "amount": { "$ref": "#/$defs/Amount" },
+        "expiresAtSeconds": { "type": "integer", "minimum": 0 }, "feeBps": { "type": "integer", "minimum": 0, "maximum": 500 },
+        "feeRecipientAccountId": { "type": "string" }, "expectedPayerAccountId": { "type": ["string", "null"] },
+        "nonce": { "type": "string", "contentEncoding": "base64", "description": "Exactly 32 decoded bytes." },
+        "signature": { "type": "string", "contentEncoding": "base64", "description": "Ed25519 signature over SHA-256(domain prefix || canonical Borsh payload)." }
+      },
+      "additionalProperties": false
+    },
+    "OrderState": { "type": "string", "enum": ["OPEN", "PROCESSING", "PAYOUT_RETRYABLE", "PARTIAL_PAYOUT", "REFUND_PENDING", "REFUNDED", "SETTLED", "EXPIRED", "CANCELLED", "RECONCILIATION_REQUIRED"] },
+    "MerchantProfile": {
+      "type": "object", "required": ["merchantId", "accountId", "payoutAccountId", "displayName", "webhookUrl", "createdAtMs"],
+      "properties": { "merchantId": { "type": "string" }, "accountId": { "type": "string" }, "payoutAccountId": { "type": "string" }, "displayName": { "type": "string" }, "webhookUrl": { "type": ["string", "null"] }, "createdAtMs": { "type": "integer" } }, "additionalProperties": false
+    },
+    "PaymentLink": {
+      "type": "object", "required": ["slug", "merchantId", "displayName", "payoutAccountId", "networkId", "asset", "amount", "amountDisplay", "expiresAtSeconds", "multiPay", "maxRedemptions", "createdAtMs", "claimsUsed"],
+      "properties": { "slug": { "type": "string" }, "merchantId": { "type": "string" }, "displayName": { "type": "string" }, "payoutAccountId": { "type": "string" }, "networkId": { "$ref": "#/$defs/NetworkId" }, "asset": { "$ref": "#/$defs/Asset" }, "amount": { "$ref": "#/$defs/Amount" }, "amountDisplay": { "type": "string" }, "expiresAtSeconds": { "type": ["integer", "null"] }, "multiPay": { "type": "boolean" }, "maxRedemptions": { "type": ["integer", "null"], "minimum": 1 }, "createdAtMs": { "type": "integer" }, "claimsUsed": { "type": "integer", "minimum": 0 } }, "additionalProperties": false
+    },
+    "LinkClaim": { "type": "object", "required": ["orderId", "merchantId", "payerAccountId", "authorization"], "properties": { "orderId": { "type": "string" }, "merchantId": { "type": "string" }, "payerAccountId": { "type": "string" }, "authorization": { "$ref": "#/$defs/SignedOrderAuthorization" } }, "additionalProperties": false },
+    "OrderStatus": {
+      "type": "object", "required": ["orderId", "merchantId", "networkId", "contractId", "state", "asset", "amount", "fee", "net", "payerAccountId", "merchantAccountId", "payoutAccountId", "transactionHash", "settlementReceiptId", "updatedAtMs", "failureReason"],
+      "properties": { "orderId": { "type": "string" }, "merchantId": { "type": "string" }, "networkId": { "$ref": "#/$defs/NetworkId" }, "contractId": { "type": "string" }, "state": { "$ref": "#/$defs/OrderState" }, "asset": { "$ref": "#/$defs/Asset" }, "amount": { "$ref": "#/$defs/Amount" }, "fee": { "$ref": "#/$defs/Amount" }, "net": { "$ref": "#/$defs/Amount" }, "payerAccountId": { "type": "string" }, "merchantAccountId": { "type": "string" }, "payoutAccountId": { "type": "string" }, "transactionHash": { "type": ["string", "null"] }, "settlementReceiptId": { "type": ["string", "null"] }, "updatedAtMs": { "type": "integer" }, "failureReason": { "type": ["string", "null"] }, "authorization": { "$ref": "#/$defs/SignedOrderAuthorization" } }, "additionalProperties": false
+    },
+    "PaymentEvent": {
+      "type": "object", "required": ["id", "networkId", "contractId", "receiptId", "transactionHash", "orderId", "merchantId", "payerAccountId", "payoutAccountId", "asset", "amount", "fee", "net", "state", "timestampMs"],
+      "properties": { "id": { "type": "string", "description": "networkId:contractId:receiptId:logIndex" }, "networkId": { "$ref": "#/$defs/NetworkId" }, "contractId": { "type": "string" }, "receiptId": { "type": "string" }, "transactionHash": { "type": "string" }, "orderId": { "type": "string" }, "merchantId": { "type": "string" }, "payerAccountId": { "type": "string" }, "payoutAccountId": { "type": "string" }, "asset": { "$ref": "#/$defs/Asset" }, "amount": { "$ref": "#/$defs/Amount" }, "fee": { "$ref": "#/$defs/Amount" }, "net": { "$ref": "#/$defs/Amount" }, "state": { "$ref": "#/$defs/OrderState" }, "timestampMs": { "type": "integer" }, "merchantReference": { "type": ["string", "null"] }, "source": { "type": ["string", "null"], "enum": ["link", "checkout", "gateway", null] }, "settlementReceiptId": { "type": ["string", "null"] } }, "additionalProperties": false
+    },
+    "Receipt": { "type": "object", "required": ["transactionHash", "receiptId", "finalized", "success"], "properties": { "transactionHash": { "type": "string" }, "receiptId": { "type": "string" }, "finalized": { "type": "boolean" }, "success": { "type": "boolean" } }, "additionalProperties": false },
+    "Webhook": { "type": "object", "required": ["id", "type", "created", "data"], "properties": { "id": { "type": "string" }, "type": { "const": "payment.confirmed" }, "created": { "type": "integer" }, "data": { "$ref": "#/$defs/PaymentEvent" } }, "additionalProperties": false },
+    "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "string" }, "code": { "type": ["string", "null"] }, "details": {} }, "additionalProperties": false }
+  }
+}

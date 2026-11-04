@@ -1,0 +1,65 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --paper: #f2efe6;
+  --ink: #0b0f0e;
+  --vault: #07382e;
+  --signal: #12e08a;
+  --green-deep: #0bb06b;
+  --alert: #e5484d;
+  --mist: #777d76;
+  --line: #d8d4c6;
+  --white: #fffefa;
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --border: var(--line);
+  --ring: var(--green-deep);
+  --radius: 1.25rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-vault: var(--vault);
+  --color-signal: var(--signal);
+  --color-green-deep: var(--green-deep);
+  --color-alert: var(--alert);
+  --color-mist: var(--mist);
+  --color-line: var(--line);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply m-0 flex min-h-full flex-col bg-background font-sans text-foreground antialiased;
+  }
+
+  a {
+    @apply text-inherit no-underline;
+  }
+
+  ::selection {
+    @apply bg-signal text-ink;
+  }
+}
