@@ -24,3 +24,6 @@ worldz-near-protocol = { path = "../../crates/near-protocol" }
 near-sdk = { workspace = true, features = ["legacy", "unit-testing"] }
 ed25519-dalek = { version = "2.1.1", features = ["rand_core"] }
 rand = "0.8.5"
+anyhow = "1.0.98"
+near-workspaces = "0.24.0"
+tokio = { version = "1.44.1", features = ["macros", "rt-multi-thread", "time"] }

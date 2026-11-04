@@ -1,0 +1,24 @@
+{
+  "protocol": "worldz.near.order-auth/v1",
+  "testOnlyPrivateKeySeedHex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+  "publicKeyBase64": "GX9rI+FshTLGq8g4+s1ep4m+DHaykgM0A5v6iz02jWE=",
+  "payload": {
+    "protocolVersion": 1,
+    "signerKeyId": "platform-2026-01",
+    "networkId": "testnet",
+    "contractId": "router.worldz.testnet",
+    "merchantId": "mch_test_01",
+    "merchantAccountId": "merchant.worldz.testnet",
+    "payoutAccountId": "payout.worldz.testnet",
+    "orderId": "ord_01HZX3W2Q6",
+    "asset": { "type": "native" },
+    "amount": "25000000000000000000000000",
+    "expiresAtSeconds": 1800000000,
+    "feeBps": 30,
+    "feeRecipientAccountId": "fees.worldz.testnet",
+    "expectedPayerAccountId": "payer.worldz.testnet",
+    "nonce": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="
+  },
+  "digestHex": "e53a66a4ff27a310097717c2d19c9396036d2804b11f15da6a9d2ab7070962c7",
+  "signatureBase64": "X+aHjcQbBjzPyIXkSOvctpo7pHll5yR6N5xs86VR0maWHkA7U6qgxGGtkwlg21oJQPO5KTT2b0KEOn3g82/1Cg=="
+}

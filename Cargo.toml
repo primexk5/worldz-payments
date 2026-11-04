@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/near-protocol", "contracts/router", "backend"]
+members = ["crates/near-protocol", "contracts/router", "contracts/mock-ft", "backend"]
 
 [workspace.package]
 version = "0.1.0"

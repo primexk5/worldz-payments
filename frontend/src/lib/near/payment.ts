@@ -8,7 +8,7 @@ export { isVerifiedSettlement } from "./order-state";
 
 const YOCTO_PER_NEAR = 10n ** 24n;
 const YOCTO_DEPOSIT = "1";
-const TX_GAS = "120000000000000";
+const TX_GAS = "180000000000000";
 const STORAGE_GAS = "50000000000000";
 const PENDING_PREFIX = "worldz:near:pending:";
 

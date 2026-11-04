@@ -1,0 +1,28 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# JavaScript dependencies and generated frontend output
+/frontend/node_modules/
+/frontend/.next/
+/frontend/out/
+/frontend/build/
+/frontend/coverage/
+/frontend/*.tsbuildinfo
+
+# Local environment files; keep example templates shareable
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Credentials, keys, and local runtime files
+*.pem
+*.key
+*.p12
+*.pfx
+.near-credentials/
+*.log
+.DS_Store

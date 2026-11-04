@@ -10,7 +10,9 @@ pub const EVENT_VERSION: &str = "1.0.0";
 pub const DEFAULT_FEE_BPS: u16 = 30;
 pub const MAX_FEE_BPS: u16 = 500;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkId {
     Testnet,
@@ -27,10 +29,17 @@ impl NetworkId {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Asset {
     Native,
-    Nep141 { #[serde(rename = "contractId")] contract_id: String },
+    Nep141 {
+        #[serde(rename = "contractId")]
+        contract_id: String,
+    },
 }
 
 impl Asset {
@@ -65,7 +74,9 @@ pub mod nonce_base64 {
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[u8; 32], D::Error> {
         let encoded = <String as Deserialize>::deserialize(deserializer)?;
         let decoded = BASE64.decode(encoded).map_err(serde::de::Error::custom)?;
-        decoded.try_into().map_err(|_| serde::de::Error::custom("nonce must decode to exactly 32 bytes"))
+        decoded
+            .try_into()
+            .map_err(|_| serde::de::Error::custom("nonce must decode to exactly 32 bytes"))
     }
 }
 
@@ -144,7 +155,9 @@ pub struct SignedAuthorization {
     pub signature: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
+)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OrderState {
     Open,
@@ -280,7 +293,10 @@ mod tests {
         let json = serde_json::to_value(&payload).unwrap();
         let encoded = json["nonce"].as_str().unwrap();
         assert_eq!(BASE64.decode(encoded).unwrap(), vec![7u8; 32]);
-        assert_eq!(serde_json::from_value::<AuthorizationPayload>(json).unwrap(), payload);
+        assert_eq!(
+            serde_json::from_value::<AuthorizationPayload>(json).unwrap(),
+            payload
+        );
     }
 
     #[test]
@@ -305,5 +321,24 @@ mod tests {
         let mut other = payload.clone();
         other.nonce[0] = 8;
         assert_ne!(payload.replay_key().unwrap(), other.replay_key().unwrap());
+    }
+
+    #[test]
+    fn canonical_authorization_signature_vector() {
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let payload = example_payload();
+        let key = SigningKey::from_bytes(&[42; 32]);
+        let digest = payload.signing_digest().unwrap();
+        let signature = key.sign(&digest);
+        assert_eq!(
+            hex::encode(digest),
+            "e53a66a4ff27a310097717c2d19c9396036d2804b11f15da6a9d2ab7070962c7"
+        );
+        assert_eq!(BASE64.encode(signature.to_bytes()), "X+aHjcQbBjzPyIXkSOvctpo7pHll5yR6N5xs86VR0maWHkA7U6qgxGGtkwlg21oJQPO5KTT2b0KEOn3g82/1Cg==");
+        assert_eq!(
+            BASE64.encode(key.verifying_key().to_bytes()),
+            "GX9rI+FshTLGq8g4+s1ep4m+DHaykgM0A5v6iz02jWE="
+        );
     }
 }
