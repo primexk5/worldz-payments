@@ -79,13 +79,15 @@ export const nearApi = {
       body: body({ payerAccountId, networkId: NEAR_NETWORK_ID }),
     });
   },
-  order(merchantId: string, orderId: string) {
-    return request<OrderStatus>(`/orders/${encodeURIComponent(merchantId)}/${encodeURIComponent(orderId)}?networkId=${NEAR_NETWORK_ID}`);
+  order(merchantId: string, orderId: string, transactionHash?: string | null) {
+    const query = new URLSearchParams({ networkId: NEAR_NETWORK_ID });
+    if (transactionHash) query.set("transactionHash", transactionHash);
+    return request<OrderStatus>(`/orders/${encodeURIComponent(merchantId)}/${encodeURIComponent(orderId)}?${query.toString()}`);
   },
-  submitPaymentMeta(merchantId: string, orderId: string, customerName?: string, slug?: string) {
+  submitPaymentMeta(merchantId: string, orderId: string, customerName?: string, slug?: string, transactionHash?: string) {
     return request<void>(`/orders/${encodeURIComponent(merchantId)}/${encodeURIComponent(orderId)}/meta`, {
       method: "POST",
-      body: body({ customerName, slug, networkId: NEAR_NETWORK_ID }),
+      body: body({ customerName, slug, transactionHash, networkId: NEAR_NETWORK_ID }),
     });
   },
   apiKeys() {

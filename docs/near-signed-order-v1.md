@@ -39,4 +39,4 @@ Wallet transaction success only means order processing began. `SETTLED` requires
 
 ## Test vectors
 
-`crates/near-protocol` tests pin decimal-string serialization, nonce size, domain/network/contract separation, and replay-key stability. A fixed-key signature vector will be added after the canonical crate tests run on the selected Rust toolchain.
+`crates/near-protocol` tests pin decimal-string serialization, nonce size, domain/network/contract separation, replay-key stability, and a fixed-key signature vector. The backend signs with the same shared crate; NEP-413 wallet-auth signatures use their separate NEP-defined Borsh domain.

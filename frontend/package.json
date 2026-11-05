@@ -7,13 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:near": "node --experimental-strip-types --test src/lib/near/amounts.test.mjs"
+    "test:near": "node --experimental-strip-types --test src/lib/near/amounts.test.mjs",
+    "docs:export": "node scripts/export-docs.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
     "@hot-labs/near-connect": "^0.12.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.2",
+    "jspdf": "^4.2.1",
     "lucide-react": "^1.67.0",
     "next": "16.4.4",
     "react": "19.3.0",

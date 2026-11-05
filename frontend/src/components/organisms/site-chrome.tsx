@@ -7,11 +7,11 @@ import { SiteFooter } from "@/components/organisms/site-footer";
 
 function isFocusedFlow(pathname: string): boolean {
   return pathname.startsWith("/dashboard") || pathname.startsWith("/pay/") ||
-    pathname.startsWith("/checkout/") || pathname === "/login" || pathname === "/onboarding" || pathname === "/terms";
+    pathname.startsWith("/checkout/") || pathname === "/login" || pathname === "/onboarding" || pathname === "/terms" || pathname === "/brand-concepts";
 }
 
 export function SiteChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   if (isFocusedFlow(pathname)) return <>{children}</>;
-  return <><SiteHeader />{children}<SiteFooter /></>;
+  return <><a href="#main-content" className="fixed left-4 top-4 z-[100] -translate-y-24 rounded-full bg-ink px-5 py-3 text-sm text-paper focus:translate-y-0">Skip to content</a><SiteHeader />{children}<SiteFooter /></>;
 }

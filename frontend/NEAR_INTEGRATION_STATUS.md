@@ -23,7 +23,7 @@ The connector is configured to require testnet, message signing, and transaction
 
 ## Integration boundary
 
-The frontend targets the versioned API models in `src/lib/near/types.ts` and the API routes in `src/lib/near/api.ts`. The `worldz-payment/backend` and `worldz-payment/contracts` folders are not implemented in this frontend pass, and `NEXT_PUBLIC_NEAR_CONTRACT_ID` is an example placeholder. Do not treat the dashboard or checkout as a completed testnet integration until the Rust API and router are deployed and browser wallet flows are exercised against them.
+The frontend targets the versioned API models in `src/lib/near/types.ts` and the API routes in `src/lib/near/api.ts`. The Rust API, router, and sandbox flows are implemented in the workspace, while `NEXT_PUBLIC_NEAR_CONTRACT_ID` remains an example placeholder. Do not treat the dashboard or checkout as a completed TestNet integration until PostgreSQL, API signer configuration, the router, and browser wallet flows have been exercised together.
 
 Payout account entries are checked through NEAR's `view_account` RPC before the frontend asks the merchant identity wallet to sign the destination update; the backend still performs its own account and signature validation.
 

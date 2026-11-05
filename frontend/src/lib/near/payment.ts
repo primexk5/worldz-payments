@@ -220,6 +220,9 @@ export async function submitAuthorizedPayment(input: {
   const submitted = { ...pending, transactionHash: outcome.transaction.hash };
   savePendingPayment(submitted);
   input.onSubmitted?.(submitted);
+  void nearApi
+    .submitPaymentMeta(input.claim.merchantId, input.claim.orderId, undefined, input.linkSlug, outcome.transaction.hash)
+    .catch(() => undefined);
   return submitted;
 }
 
@@ -229,10 +232,11 @@ export async function waitForVerifiedSettlement(
   orderId: string,
   onStatus?: (status: OrderStatus) => void,
   timeoutMs = 180_000,
+  transactionHash?: string | null,
 ): Promise<OrderStatus> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const status = await nearApi.order(merchantId, orderId);
+    const status = await nearApi.order(merchantId, orderId, transactionHash);
     onStatus?.(status);
     if (isVerifiedSettlement(status) || status.state === "REFUNDED" || status.state === "RECONCILIATION_REQUIRED") {
       return status;

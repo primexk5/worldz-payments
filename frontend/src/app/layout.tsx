@@ -23,6 +23,11 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    shortcut: "/favicon.ico",
+    apple: [{ url: "/brand/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   title: "worldzPayments — Get paid. Keep your keys.",
   description: "Non-custodial checkout, payment links and invoices for merchants. Every payment settles straight to your wallet.",
 };

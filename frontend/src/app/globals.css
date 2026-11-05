@@ -11,7 +11,7 @@
   --signal: #12e08a;
   --green-deep: #0bb06b;
   --alert: #e5484d;
-  --mist: #777d76;
+  --mist: #8c9189;
   --line: #d8d4c6;
   --white: #fffefa;
   --background: var(--paper);
@@ -21,6 +21,18 @@
   --border: var(--line);
   --ring: var(--green-deep);
   --radius: 1.25rem;
+  --card: #ffffff;
+  --card-foreground: #0b0f0e;
+  --popover: #ffffff;
+  --popover-foreground: #0b0f0e;
+  --muted: #e9e6dc;
+  --muted-foreground: #8c9189;
+  --secondary: #e9e6dc;
+  --secondary-foreground: #0b0f0e;
+  --accent: #e9e6dc;
+  --accent-foreground: #0b0f0e;
+  --destructive: #e5484d;
+  --input: #d8d4c6;
 }
 
 @theme inline {
@@ -32,14 +44,32 @@
   --color-signal: var(--signal);
   --color-green-deep: var(--green-deep);
   --color-alert: var(--alert);
+  --color-amber: #f5b83d;
+  --font-serif: var(--font-instrument-serif, Georgia), serif;
   --color-mist: var(--mist);
   --color-line: var(--line);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist-sans, Arial), Helvetica, sans-serif;
+  --font-mono: var(--font-geist-mono, monospace), monospace;
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-border: var(--border);
   --color-ring: var(--ring);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-input: var(--input);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
 @layer base {
@@ -52,6 +82,7 @@
   }
 
   body {
+    font-family: var(--font-geist-sans, Arial), Helvetica, sans-serif;
     @apply m-0 flex min-h-full flex-col bg-background font-sans text-foreground antialiased;
   }
 
@@ -63,3 +94,87 @@
     @apply bg-signal text-ink;
   }
 }
+
+/* Merchant flows use the same brand tokens as the public frontend. */
+.workspace-theme {
+  font-family: var(--font-geist-sans, Arial), Helvetica, sans-serif;
+  --font-sans: var(--font-geist-sans, Arial), Helvetica, sans-serif;
+  --font-mono: var(--font-geist-mono, monospace), monospace;
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --border: var(--line);
+  --ring: var(--green-deep);
+}
+.workspace-theme button, .workspace-theme a, .workspace-theme input { -webkit-tap-highlight-color: transparent; }
+.workspace-theme a:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.workspace-theme [data-slot="card"] { border-radius: 20px; }
+.workspace-theme [data-slot="input"] { border-radius: 12px; }
+.workspace-theme [data-slot="button"] {
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+}
+.workspace-theme [data-slot="button"]:focus-visible { outline: 2px solid var(--signal); outline-offset: 4px; }
+.workspace-theme [data-slot="button"]:disabled { opacity: .4; box-shadow: none; }
+.workspace-theme [data-slot="button"]:not(:disabled):active { transform: translateY(2px); }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+.site-container { width: min(100% - 48px, 1248px); margin-inline: auto; }
+.site-section { padding-block: 88px; scroll-margin-top: 100px; }
+.site-heading { font-size: clamp(2.25rem, 4.2vw, 3.5rem); line-height: 1.08; letter-spacing: -.055em; font-weight: 600; }
+.site-description { font-size: 15px; line-height: 1.85; color: color-mix(in srgb, var(--ink) 65%, transparent); }
+:where(a, button, input, select, summary):focus-visible { outline: 2px solid var(--green-deep); outline-offset: 4px; }
+button, summary { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+section[id] { scroll-margin-top: 96px; }
+.auth-section > header, .auth-section > footer { flex-shrink: 0; }
+@media (max-width: 640px) {
+  .site-container { width: calc(100% - 40px); }
+  .site-section { padding-block: 56px; }
+}
+@media (max-height: 800px) {
+  .auth-content { padding-block: 16px; }
+  .auth-content > .mb-5 { margin-bottom: 16px; }
+  .auth-content > .mb-6 { margin-bottom: 16px; width: 40px; height: 40px; }
+  .auth-features { display: none; }
+  .auth-preview { margin-top: 24px; padding: 20px; }
+  .auth-preview .h-24 { height: 64px; }
+  .auth-page aside h2 { font-size: 44px; margin-top: 20px; }
+  .auth-page aside > div > p { margin-top: 12px; }
+}
+@media (max-height: 700px) {
+  .auth-section { padding-block: 14px; }
+  .auth-section > footer { font-size: 10px; }
+  .auth-content { padding-block: 10px; }
+  .auth-content h1 { font-size: 26px; }
+  .auth-content > p { margin-top: 10px; font-size: 12px; line-height: 18px; }
+  .auth-content form { margin-top: 14px; }
+  .auth-content form > * + * { margin-top: 10px; }
+  .auth-content form label > span { display: none; }
+  .auth-content form label { font-size: 12px; }
+  .auth-content form input { height: 36px; margin-top: 6px; }
+  .auth-content form details { padding-block: 8px; }
+  .auth-content form button { height: 40px; }
+  .auth-content > .mb-5 { margin-bottom: 12px; }
+  .auth-content > .mb-6 { display: none; }
+  .auth-content > .mt-6 { margin-top: 16px; }
+  .auth-content > .my-5 { margin-block: 14px; }
+}
+@media (max-height: 540px) {
+  .auth-section > footer { display: none; }
+  .auth-content { overflow-y: auto; justify-content: safe center; }
+}
+
+@media print {
+  body > header, body > footer, .docs-toolbar, .docs-sidebar, .docs-mobile-nav { display: none !important; }
+  .docs-page .site-container { width: 100%; display: block; }
+  .docs-page article section { break-inside: auto; scroll-margin: 0; }
+  .docs-page pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+/* Keep topic anchors below both the site header and the docs toolbar. */
+.docs-page section[id] { scroll-margin-top: 160px; }

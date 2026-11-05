@@ -1,3 +1,3 @@
 import { redirect } from "next/navigation";
 
-export default function DevelopersPage() { redirect("/#docs"); }
+export default function DevelopersPage() { redirect("/docs#typescript-client"); }

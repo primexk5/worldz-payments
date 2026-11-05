@@ -1,10 +1,11 @@
 import Link from "next/link";
 import Image from "next/image";
+import { cn } from "@/lib/utils";
+
+export function BrandLogo({ inverse = false, className }: { inverse?: boolean; className?: string }) {
+  return <Image src={`/brand/logo-${inverse ? "dark" : "light"}.svg`} alt="worldzPayments" width={330} height={64} priority unoptimized className={cn("h-auto w-[150px] object-contain sm:w-[176px]", className)}/>;
+}
 
 export function BrandMark({ inverse = false }: { inverse?: boolean }) {
-  return (
-    <Link className={`inline-flex shrink-0 items-center no-underline ${inverse ? "rounded-md bg-paper px-2 py-1" : ""}`} href="/" aria-label="worldzPayments home">
-      <Image src="/worldz-logo.png" alt="WorldzPayments" width={270} height={48} priority className="h-auto w-[142px] object-contain sm:w-[170px]" />
-    </Link>
-  );
+  return <Link className="inline-flex shrink-0 items-center" href="/" aria-label="worldzPayments home"><BrandLogo inverse={inverse}/></Link>;
 }

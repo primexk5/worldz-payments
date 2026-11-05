@@ -1,0 +1,233 @@
+use std::{env, net::IpAddr};
+
+use base64::{engine::general_purpose::STANDARD, Engine};
+use ed25519_dalek::SigningKey;
+use worldz_near_protocol::NetworkId;
+
+use crate::error::ApiError;
+
+#[derive(Clone)]
+pub struct NetworkConfig {
+    pub rpc_url: String,
+    pub rpc_fallback_urls: Vec<String>,
+    pub router_id: Option<String>,
+    pub fee_recipient: Option<String>,
+    pub signer_key_id: String,
+    pub signer: Option<SigningKey>,
+    pub ft_allowlist: Vec<String>,
+    pub indexer_start_height: u64,
+}
+
+#[derive(Clone)]
+pub struct AppConfig {
+    pub host: IpAddr,
+    pub port: u16,
+    pub database_url: String,
+    pub auth_recipient: String,
+    pub auth_challenge_ttl_seconds: i64,
+    pub session_cookie_name: String,
+    pub session_ttl_hours: i64,
+    pub session_cookie_secure: bool,
+    pub webhook_signing_secret: Option<String>,
+    pub testnet: NetworkConfig,
+    pub mainnet: NetworkConfig,
+}
+
+impl AppConfig {
+    pub fn from_env() -> Result<Self, ApiError> {
+        let testnet = network_config(
+            NetworkId::Testnet,
+            "TESTNET",
+            "https://archival-rpc.testnet.fastnear.com",
+        )?;
+        let mainnet = network_config(
+            NetworkId::Mainnet,
+            "MAINNET",
+            "https://rpc.mainnet.near.org",
+        )?;
+
+        let config = Self {
+            host: value("APP_HOST", "127.0.0.1")
+                .parse()
+                .map_err(|_| ApiError::configuration("APP_HOST must be an IP address"))?,
+            port: parse("APP_PORT", 8080u16)?,
+            database_url: required("DATABASE_URL")?,
+            auth_recipient: required("AUTH_RECIPIENT")?,
+            auth_challenge_ttl_seconds: parse("AUTH_CHALLENGE_TTL_SECONDS", 300i64)?,
+            session_cookie_name: value("SESSION_COOKIE_NAME", "worldz_session"),
+            session_ttl_hours: parse("SESSION_TTL_HOURS", 168i64)?,
+            session_cookie_secure: parse("SESSION_COOKIE_SECURE", true)?,
+            webhook_signing_secret: env::var("WEBHOOK_SIGNING_SECRET")
+                .ok()
+                .filter(|secret| !secret.is_empty()),
+            testnet,
+            mainnet,
+        };
+        if config.auth_challenge_ttl_seconds <= 0 || config.auth_challenge_ttl_seconds > 900 {
+            return Err(ApiError::configuration(
+                "AUTH_CHALLENGE_TTL_SECONDS must be between 1 and 900",
+            ));
+        }
+        if config.session_ttl_hours <= 0 || config.session_ttl_hours > 720 {
+            return Err(ApiError::configuration(
+                "SESSION_TTL_HOURS must be between 1 and 720",
+            ));
+        }
+        if config.session_cookie_name.is_empty()
+            || !config
+                .session_cookie_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        {
+            return Err(ApiError::configuration("SESSION_COOKIE_NAME is invalid"));
+        }
+        if config
+            .webhook_signing_secret
+            .as_ref()
+            .is_some_and(|secret| secret.len() < 32)
+        {
+            return Err(ApiError::configuration(
+                "WEBHOOK_SIGNING_SECRET must contain at least 32 characters",
+            ));
+        }
+        Ok(config)
+    }
+
+    pub fn network(&self, network_id: NetworkId) -> &NetworkConfig {
+        match network_id {
+            NetworkId::Testnet => &self.testnet,
+            NetworkId::Mainnet => &self.mainnet,
+        }
+    }
+}
+
+fn network_config(
+    id: NetworkId,
+    prefix: &str,
+    default_rpc: &str,
+) -> Result<NetworkConfig, ApiError> {
+    let key = format!("NEAR_{prefix}_SIGNER_SEED_BASE64");
+    let signer = env::var(&key)
+        .ok()
+        .filter(|seed| !seed.is_empty())
+        .map(|seed| {
+            let bytes = STANDARD
+                .decode(seed)
+                .map_err(|_| ApiError::configuration(format!("{key} must be base64")))?;
+            let seed: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| ApiError::configuration(format!("{key} must decode to 32 bytes")))?;
+            Ok::<_, ApiError>(SigningKey::from_bytes(&seed))
+        })
+        .transpose()?;
+
+    let rpc_url = value(&format!("NEAR_{prefix}_RPC_URL"), default_rpc);
+    validate_rpc_url(&rpc_url, &format!("NEAR_{prefix}_RPC_URL"))?;
+    let rpc_fallback_urls = optional(&format!("NEAR_{prefix}_RPC_FALLBACK_URLS"))
+        .unwrap_or_else(|| default_fallbacks(id).to_owned())
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != rpc_url)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    for url in &rpc_fallback_urls {
+        validate_rpc_url(url, &format!("NEAR_{prefix}_RPC_FALLBACK_URLS"))?;
+    }
+    let router_id = optional(&format!("NEAR_{prefix}_ROUTER_ID"));
+    let fee_recipient = optional(&format!("NEAR_{prefix}_FEE_RECIPIENT"));
+    for (key, account) in [
+        (format!("NEAR_{prefix}_ROUTER_ID"), router_id.as_deref()),
+        (
+            format!("NEAR_{prefix}_FEE_RECIPIENT"),
+            fee_recipient.as_deref(),
+        ),
+    ] {
+        if let Some(account) = account {
+            account.parse::<near_account_id::AccountId>().map_err(|_| {
+                ApiError::configuration(format!("{key} is not a valid NEAR account ID"))
+            })?;
+        }
+    }
+    let signer_key_id = value(
+        &format!("NEAR_{prefix}_SIGNER_KEY_ID"),
+        if matches!(id, NetworkId::Testnet) {
+            "worldz-testnet-1"
+        } else {
+            "worldz-mainnet-1"
+        },
+    );
+    if signer_key_id.is_empty() || signer_key_id.len() > 64 {
+        return Err(ApiError::configuration(format!(
+            "NEAR_{prefix}_SIGNER_KEY_ID must contain 1 to 64 characters"
+        )));
+    }
+    let ft_allowlist = optional(&format!("NEAR_{prefix}_FT_ALLOWLIST"))
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    for account in &ft_allowlist {
+        account.parse::<near_account_id::AccountId>().map_err(|_| {
+            ApiError::configuration(format!(
+                "NEAR_{prefix}_FT_ALLOWLIST contains invalid account ID {account}"
+            ))
+        })?;
+    }
+
+    Ok(NetworkConfig {
+        rpc_url,
+        rpc_fallback_urls,
+        router_id,
+        fee_recipient,
+        signer_key_id,
+        signer,
+        ft_allowlist,
+        indexer_start_height: parse(&format!("NEAR_{prefix}_INDEXER_START_HEIGHT"), 0u64)?,
+    })
+}
+
+fn default_fallbacks(network_id: NetworkId) -> &'static str {
+    match network_id {
+        NetworkId::Testnet => {
+            "https://near-testnet.drpc.org,https://testnet-rpc.intea.rs,https://test.rpc.fastnear.com,https://rpc.testnet.near.org"
+        }
+        NetworkId::Mainnet => {
+            "https://rpc.intea.rs,https://free.rpc.fastnear.com,https://archival-rpc.mainnet.near.org"
+        }
+    }
+}
+
+fn validate_rpc_url(value: &str, key: &str) -> Result<(), ApiError> {
+    let parsed = url::Url::parse(value)
+        .map_err(|_| ApiError::configuration(format!("{key} contains an invalid URL")))?;
+    if !matches!(parsed.scheme(), "https" | "http") || parsed.host_str().is_none() {
+        return Err(ApiError::configuration(format!(
+            "{key} must contain HTTP(S) URLs"
+        )));
+    }
+    Ok(())
+}
+
+fn required(key: &str) -> Result<String, ApiError> {
+    optional(key).ok_or_else(|| ApiError::configuration(format!("{key} is required")))
+}
+
+fn optional(key: &str) -> Option<String> {
+    env::var(key).ok().filter(|value| !value.trim().is_empty())
+}
+
+fn value(key: &str, default: &str) -> String {
+    optional(key).unwrap_or_else(|| default.to_owned())
+}
+
+fn parse<T: std::str::FromStr>(key: &str, default: T) -> Result<T, ApiError> {
+    optional(key)
+        .map(|value| {
+            value
+                .parse()
+                .map_err(|_| ApiError::configuration(format!("{key} has an invalid value")))
+        })
+        .unwrap_or(Ok(default))
+}

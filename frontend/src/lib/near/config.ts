@@ -10,7 +10,7 @@ export const NEAR_NETWORK_ID: NearNetworkId = networkValue;
 export const NEAR_RPC_URL =
   process.env.NEXT_PUBLIC_NEAR_RPC_URL ??
   (NEAR_NETWORK_ID === "testnet"
-    ? "https://rpc.testnet.near.org"
+    ? "https://near-testnet.drpc.org"
     : "https://rpc.mainnet.near.org");
 export const NEAR_EXPLORER_URL =
   process.env.NEXT_PUBLIC_NEAR_EXPLORER_URL ??

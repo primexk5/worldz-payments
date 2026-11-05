@@ -67,7 +67,15 @@ export interface LinkClaim {
   authorization: SignedOrderAuthorization;
 }
 
-export interface OrderStatus {
+/** Optional merchant/payer details recorded off-chain for receipts. */
+export interface PaymentReceiptDetails {
+  paymentDescription?: string | null;
+  customerName?: string | null;
+  merchantName?: string | null;
+  merchantReference?: string | null;
+}
+
+export interface OrderStatus extends PaymentReceiptDetails {
   orderId: string;
   merchantId: string;
   networkId: NearNetworkId;
@@ -87,7 +95,7 @@ export interface OrderStatus {
   failureReason?: string | null;
 }
 
-export interface PaymentEvent {
+export interface PaymentEvent extends PaymentReceiptDetails {
   id: string;
   networkId: NearNetworkId;
   contractId: string;
@@ -104,7 +112,6 @@ export interface PaymentEvent {
   net: string;
   state: OrderState;
   timestampMs: number;
-  merchantReference?: string | null;
   source?: "link" | "checkout" | "gateway";
 }
 
