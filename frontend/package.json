@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "clean:cache": "node scripts/clean-next-cache.mjs",
     "lint": "eslint",
     "test:near": "node --experimental-strip-types --test src/lib/near/amounts.test.mjs",
     "docs:export": "node scripts/export-docs.mjs"

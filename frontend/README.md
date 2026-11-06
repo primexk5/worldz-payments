@@ -16,6 +16,17 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Disk usage
+
+Persistent Turbopack compiler caches are disabled for development and production
+builds to save local disk space. Restarting development or rebuilding may take
+longer because the compiler starts cold. This does not disable application caching.
+
+Run `npm run clean:cache` from this directory to remove leftover Turbopack,
+Webpack and SWC compiler caches. Stop development/build processes first. This
+preserves the compiled application, optimized images and runtime caches. Next.js
+still needs `.next` output to run; its size varies with the compiled routes.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

@@ -29,6 +29,11 @@ pub struct AppConfig {
     pub session_ttl_hours: i64,
     pub session_cookie_secure: bool,
     pub webhook_signing_secret: Option<String>,
+    pub shopify_api_key: Option<String>,
+    pub shopify_api_secret: Option<String>,
+    pub shopify_app_url: Option<String>,
+    pub shopify_checkout_url: Option<String>,
+    pub shopify_token_encryption_key: Option<[u8; 32]>,
     pub testnet: NetworkConfig,
     pub mainnet: NetworkConfig,
 }
@@ -60,6 +65,24 @@ impl AppConfig {
             webhook_signing_secret: env::var("WEBHOOK_SIGNING_SECRET")
                 .ok()
                 .filter(|secret| !secret.is_empty()),
+            shopify_api_key: optional("SHOPIFY_API_KEY"),
+            shopify_api_secret: optional("SHOPIFY_API_SECRET"),
+            shopify_app_url: optional("SHOPIFY_APP_URL"),
+            shopify_checkout_url: optional("SHOPIFY_CHECKOUT_URL"),
+            shopify_token_encryption_key: optional("SHOPIFY_TOKEN_ENCRYPTION_KEY_BASE64")
+                .map(|key| {
+                    let decoded = STANDARD.decode(key).map_err(|_| {
+                        ApiError::configuration(
+                            "SHOPIFY_TOKEN_ENCRYPTION_KEY_BASE64 must be base64",
+                        )
+                    })?;
+                    decoded.try_into().map_err(|_| {
+                        ApiError::configuration(
+                            "SHOPIFY_TOKEN_ENCRYPTION_KEY_BASE64 must decode to 32 bytes",
+                        )
+                    })
+                })
+                .transpose()?,
             testnet,
             mainnet,
         };
@@ -89,6 +112,40 @@ impl AppConfig {
             return Err(ApiError::configuration(
                 "WEBHOOK_SIGNING_SECRET must contain at least 32 characters",
             ));
+        }
+        let shopify_configured = config.shopify_api_key.is_some()
+            || config.shopify_api_secret.is_some()
+            || config.shopify_app_url.is_some()
+            || config.shopify_checkout_url.is_some()
+            || config.shopify_token_encryption_key.is_some();
+        if shopify_configured
+            && (config.shopify_api_key.is_none()
+                || config.shopify_api_secret.is_none()
+                || config.shopify_app_url.is_none()
+                || config.shopify_checkout_url.is_none()
+                || config.shopify_token_encryption_key.is_none())
+        {
+            return Err(ApiError::configuration(
+                "Shopify requires SHOPIFY_API_KEY, SHOPIFY_API_SECRET, SHOPIFY_APP_URL, SHOPIFY_CHECKOUT_URL, and SHOPIFY_TOKEN_ENCRYPTION_KEY_BASE64",
+            ));
+        }
+        if let Some(app_url) = config.shopify_app_url.as_deref() {
+            let parsed = url::Url::parse(app_url)
+                .map_err(|_| ApiError::configuration("SHOPIFY_APP_URL is invalid"))?;
+            if parsed.scheme() != "https" || parsed.host_str().is_none() {
+                return Err(ApiError::configuration(
+                    "SHOPIFY_APP_URL must be an HTTPS URL",
+                ));
+            }
+        }
+        if let Some(checkout_url) = config.shopify_checkout_url.as_deref() {
+            let parsed = url::Url::parse(checkout_url)
+                .map_err(|_| ApiError::configuration("SHOPIFY_CHECKOUT_URL is invalid"))?;
+            if parsed.scheme() != "https" || parsed.host_str().is_none() {
+                return Err(ApiError::configuration(
+                    "SHOPIFY_CHECKOUT_URL must be an HTTPS URL",
+                ));
+            }
         }
         Ok(config)
     }

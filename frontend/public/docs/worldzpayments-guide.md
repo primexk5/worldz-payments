@@ -10,6 +10,7 @@ Code examples use testnet. Relative API paths refer to the frontend origin.
 - [Wallets & merchant accounts](#wallet-and-account)
 - [Networks, assets & amounts](#networks-and-assets)
 - [Create & share payment links](#payment-links)
+- [Shopify product checkout](#shopify)
 - [The customer checkout](#customer-checkout)
 - [Receipts & payer details](#receipts)
 - [Invoice-style payment requests](#invoice-requests)
@@ -104,6 +105,7 @@ Accept a fixed payment without building a checkout.
 2. **Describe the item or service.** Fill in “What is this payment for?” with a clear description, such as “Website design deposit” or “Watch”. The description appears at checkout and on the receipt. The current limit is 80 characters.
 3. **Choose expiry and reuse.** Use Never or a timed expiry. Enable Allow repeated payments for a link that multiple customers can claim, then choose a redemption limit or Unlimited.
 4. **Create, copy and share.** Select Create payment link. Use Copy to share the full URL, or Open to review the checkout page. Payments appear in your merchant history after the service records the payment event.
+5. **Delete a link you no longer need.** In Dashboard → Payment links, select the trash button beside an active link and confirm. The old URL stops accepting new claims; existing payment records remain in your history.
 
 | Option | Behavior |
 | --- | --- |
@@ -117,6 +119,45 @@ Accept a fixed payment without building a checkout.
 
 - [Create a payment link](https://YOUR_PLATFORM_ORIGIN/dashboard/links)
 - [See the API example](#create-link-api)
+
+<a id="shopify"></a>
+
+## Shopify product checkout
+
+Connect a Shopify store and add Pay with NEAR to product pages.
+
+The Shopify integration adds a Pay with NEAR theme app block to product pages. It hands the selected product variant and quantity to WorldzPayments, then redirects the buyer to hosted NEAR checkout. This is a product-page integration, not a payment method inside Shopify's native cart or checkout.
+
+1. **Configure your Shopify app.** A Shopify Partner app is required. Copy shopify/shopify.app.toml.example into the Shopify CLI app root, set the app client ID and public origins, and configure the documented read_products, read_orders and write_orders scopes, callback URL and app proxy. Set backend SHOPIFY_API_KEY, SHOPIFY_API_SECRET, SHOPIFY_APP_URL, SHOPIFY_CHECKOUT_URL and a dedicated 32-byte SHOPIFY_TOKEN_ENCRYPTION_KEY_BASE64. Keep these secrets on the backend only.
+2. **Connect the store.** In WorldzPayments Dashboard → Settings → Shopify integration, enter the store's *.myshopify.com domain and approve the Shopify authorization. The connection appears in Settings when OAuth completes.
+3. **Set a fixed token price.** Create a JSON metafield definition on product variants with namespace worldz, key payment and type JSON. Set the token amount, asset and network independently for each variant. WorldzPayments verifies the token against enabled network metadata.
+4. **Add the storefront button.** In Shopify's theme editor, open a product template, add the Pay with NEAR app block to the product information section, and save. The block uses the selected variant and quantity.
+5. **Complete payment and fulfillment.** The buyer enters email and, for shippable variants, a shipping address, then pays from a NEAR wallet. After finalized settlement, WorldzPayments creates a Shopify order marked paid. Shipping and taxes are handled by the merchant afterward.
+
+### Variant metafield · testnet USDC.e
+
+```json
+{
+  "networkId": "testnet",
+  "asset": {
+    "type": "nep141",
+    "contractId": "usdc.fakes.testnet",
+    "symbol": "USDC.e",
+    "decimals": 6
+  },
+  "amount": "3.25"
+}
+```
+
+- Set amount as a positive decimal string with no currency conversion; this is the fixed token price the buyer pays.
+- Physical product orders include the buyer's shipping address, but shipping charges and taxes are not quoted in the NEAR checkout. Arrange them after payment.
+- Buyer email and shipping details are encrypted at rest and removed from WorldzPayments after the Shopify order sync succeeds.
+- The Shopify Admin API token and encryption key stay server-side; never put them in storefront JavaScript or commit them to source control.
+
+> **Test before enabling on a live store**
+> Use a Shopify development store and a configured NEAR testnet merchant first. Verify app proxy signing, variant metafields, the hosted wallet payment, the paid Shopify order and the recorded settlement reference.
+
+- [Connect a Shopify store](https://YOUR_PLATFORM_ORIGIN/dashboard/settings)
 
 <a id="customer-checkout"></a>
 
@@ -302,8 +343,9 @@ Requests and responses use JSON with camelCase field names. The frontend proxy f
 | PUT | /me/payouts | Session + fresh wallet proof · change payout account. |
 | GET | /assets?networkId=testnet | Public · enabled NEP-141 token metadata. |
 | GET | /network-config?networkId=testnet | Public · network, router and signer configuration. |
-| GET / POST | /links | Session · list or create merchant payment links. |
-| GET | /links/{slug} | Public · read a payment link. |
+| GET / POST | /links | Session · list or create active merchant payment links. |
+| GET | /links/{slug} | Public · read an active payment link. |
+| DELETE | /links/{slug} | Session · deactivate a link and stop new claims; payment records remain. |
 | POST | /links/{slug}/claim | Public · create a payer-bound authorized order. |
 | GET | /orders/{merchantId}/{orderId}?networkId=testnet | Public · read and reconcile order status. |
 | POST | /orders/{merchantId}/{orderId}/meta | Record payer name or a validated submission hash. |
@@ -488,7 +530,7 @@ Keep track of activity, balances and settled payments.
 | Payment links | Create and copy links; review each link’s reuse settings. |
 | Payments | Search item, payer, order or reference; filter by state; expand a payment for financial details and its receipt. |
 | Analytics | Review settled volume for each asset, daily activity and completion statistics. |
-| Settings | Update your business profile, authorize a payout account change and configure notifications. |
+| Settings | Update your business profile and payout, connect Shopify, manage API keys and configure webhooks. |
 
 A connected wallet balance is an on-chain account reading, not a pooled WorldzPayments balance. Amounts in different assets stay separate; the dashboard does not combine token base units or promise a fiat exchange value.
 
@@ -554,11 +596,11 @@ if (!response.ok) {
 
 Planned merchant integrations, checkout expansion and mobile app.
 
-The roadmap includes two additional checkout channels and a merchant mobile app. All are planned products or integrations; the current hosted checkout still requires a NEAR wallet.
+The current Shopify integration is a product-page theme app block that hands off to hosted NEAR checkout. It requires a NEAR wallet. The roadmap includes a native Shopify checkout payment method, walletless card/bank checkout and a merchant mobile app.
 
 | Planned feature | Intended experience | Timing & dependencies |
 | --- | --- | --- |
-| Shopify checkout payment app | NEAR appears as a payment method inside Shopify checkout. | 4–8+ weeks of engineering, plus Shopify partner access, review and approval time. |
+| Native Shopify checkout payment app | NEAR appears as a payment method inside Shopify's native cart and checkout. | Requires a separate Shopify payments app integration and Shopify partner review/approval. |
 | Walletless card/bank checkout | The buyer pays with fiat and never connects a NEAR wallet. | Several more weeks, depending on the payment provider, custody/settlement model and approvals. |
 | Mobile app (iOS & Android) | Merchants create and share links, track payment history and receipts, and receive payment notifications. | Scope and timeline to be defined after discovery of NEAR wallet connectivity, notifications and platform release requirements. |
 

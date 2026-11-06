@@ -543,6 +543,12 @@ pub async fn reconcile_order(state: &AppState, row: &MySqlRow) -> Result<(), Api
         .bind(&merchant_id)
         .execute(&mut *tx)
         .await?;
+    sqlx::query("INSERT IGNORE INTO shopify_order_sync (slug) SELECT c.slug FROM shopify_checkout_sessions c JOIN orders o ON o.link_slug=c.slug WHERE o.network_id=? AND o.contract_id=? AND o.order_id=?")
+        .bind(network_id.as_str())
+        .bind(&contract_id)
+        .bind(&order_id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }

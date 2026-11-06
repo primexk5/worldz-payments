@@ -4,7 +4,7 @@ import { NEAR_NETWORK_ID } from "@/lib/near/config";
 
 export const metadata: Metadata = {
   title: "Documentation — worldzPayments",
-  description: "Learn to accept NEAR payments with WorldzPayments. Merchant setup, payment links, checkout, receipts, TypeScript integration, REST API, webhooks and settlement.",
+  description: "Learn to accept NEAR payments with WorldzPayments. Shopify product checkout, payment links, receipts, TypeScript API, webhooks and settlement.",
 };
 
 export default function DocsPage() {

@@ -16,6 +16,7 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path:
       method: request.method,
       headers,
       body,
+      redirect: "manual",
       cache: "no-store",
       signal: AbortSignal.timeout(45_000),
     });

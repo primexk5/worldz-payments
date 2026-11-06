@@ -6,6 +6,7 @@ mod indexer;
 mod models;
 mod near_rpc;
 mod orders;
+mod shopify;
 mod state;
 mod webhooks;
 
@@ -49,6 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     webhooks::spawn_worker(state.clone());
     orders::spawn_reconciliation_worker(state.clone());
+    shopify::spawn_order_sync_worker(state.clone());
     indexer::spawn_indexer_worker(state);
 
     let listener = tokio::net::TcpListener::bind(address).await?;

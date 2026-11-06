@@ -1,0 +1,32 @@
+{% assign variant = product.selected_or_first_available_variant %}
+{% if product and variant %}
+  <div class="worldz-near-payment" {{ block.shopify_attributes }}>
+    <button
+      type="button"
+      class="button button--full-width"
+      data-worldz-checkout
+      data-label="{{ block.settings.label | escape }}"
+      data-default-variant="{{ variant.id }}"
+    >
+      {{ block.settings.label | escape }}
+    </button>
+    <p data-worldz-error role="alert" hidden></p>
+  </div>
+  <script src="{{ 'worldz-checkout.js' | asset_url }}" defer></script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "Pay with NEAR",
+  "target": "section",
+  "templates": ["product"],
+  "settings": [
+    {
+      "type": "text",
+      "id": "label",
+      "label": "Button label",
+      "default": "Pay with NEAR"
+    }
+  ]
+}
+{% endschema %}

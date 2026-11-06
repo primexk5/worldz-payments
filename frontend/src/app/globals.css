@@ -127,7 +127,18 @@
 .site-section { padding-block: 88px; scroll-margin-top: 100px; }
 .site-heading { font-size: clamp(2.25rem, 4.2vw, 3.5rem); line-height: 1.08; letter-spacing: -.055em; font-weight: 600; }
 .site-description { font-size: 15px; line-height: 1.85; color: color-mix(in srgb, var(--ink) 65%, transparent); }
-:where(a, button, input, select, summary):focus-visible { outline: 2px solid var(--green-deep); outline-offset: 4px; }
+@keyframes hero-card-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero-globe-card { animation: hero-card-float 8s ease-in-out infinite; }
+  .hero-globe-card-payment { animation-delay: -3s; animation-duration: 9s; }
+  .hero-globe-card-network { animation-delay: -5s; animation-duration: 10s; }
+}
+:where(a, button, summary):focus-visible { outline: 2px solid var(--green-deep); outline-offset: 4px; }
+:where(input, select, textarea, [role="combobox"]):focus-visible { outline: 2px solid var(--mist); outline-offset: 2px; }
+.payment-link-form input:focus-visible { outline: none; }
 button, summary { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 section[id] { scroll-margin-top: 96px; }

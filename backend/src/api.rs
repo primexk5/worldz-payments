@@ -43,12 +43,23 @@ pub fn routes() -> Router<AppState> {
         .route("/assets", get(get_assets))
         .route("/network-config", get(get_network_config))
         .route("/links", get(list_links).post(create_link))
-        .route("/links/{slug}", get(get_link))
+        .route("/links/{slug}", get(get_link).delete(delete_link))
         .route("/links/{slug}/claim", post(claim_link))
         .route("/orders/{merchant_id}/{order_id}", get(get_order))
         .route(
             "/orders/{merchant_id}/{order_id}/meta",
             post(update_order_meta),
+        )
+        .route("/shopify/install", get(crate::shopify::install))
+        .route("/shopify/callback", get(crate::shopify::callback))
+        .route("/shopify/connection", get(crate::shopify::connection))
+        .route(
+            "/shopify/proxy/checkout",
+            get(crate::shopify::proxy_checkout),
+        )
+        .route(
+            "/shopify/checkouts/{slug}",
+            get(crate::shopify::get_checkout).put(crate::shopify::save_buyer_details),
         )
 }
 
@@ -137,7 +148,7 @@ async fn list_links(
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let merchant = auth::current_merchant(&state, &headers).await?;
-    let rows = sqlx::query("SELECT l.*, m.payout_account_id AS payout_account_id FROM payment_links l JOIN merchants m USING (merchant_id) WHERE l.merchant_id = ? ORDER BY l.created_at DESC")
+    let rows = sqlx::query("SELECT l.*, m.payout_account_id AS payout_account_id FROM payment_links l JOIN merchants m USING (merchant_id) WHERE l.merchant_id = ? AND l.active = TRUE ORDER BY l.created_at DESC")
         .bind(merchant.merchant_id)
         .fetch_all(&state.pool)
         .await?;
@@ -206,6 +217,33 @@ async fn get_link(
         return Err(ApiError::not_found("Payment link has expired."));
     }
     Ok(Json(link))
+}
+
+async fn delete_link(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(slug): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let merchant = auth::current_merchant(&state, &headers).await?;
+    let result =
+        sqlx::query("UPDATE payment_links SET active=FALSE WHERE slug=? AND merchant_id=?")
+            .bind(&slug)
+            .bind(&merchant.merchant_id)
+            .execute(&state.pool)
+            .await?;
+    if result.rows_affected() == 0 {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM payment_links WHERE slug=? AND merchant_id=?)",
+        )
+        .bind(&slug)
+        .bind(&merchant.merchant_id)
+        .fetch_one(&state.pool)
+        .await?;
+        if !exists {
+            return Err(ApiError::not_found("Payment link not found."));
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn claim_link(

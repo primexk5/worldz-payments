@@ -3,9 +3,10 @@ import type { NearAsset, TokenMetadata } from "./types";
 
 export const nativeNearAsset: NearAsset = NEAR_NATIVE_ASSET;
 
-async function viewFunction<T>(contractId: string, methodName: string, args: Record<string, unknown> = {}): Promise<T> {
+async function viewFunction<T>(contractId: string, methodName: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
   const response = await fetch(NEAR_RPC_URL, {
     method: "POST",
+    signal,
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -28,9 +29,10 @@ async function viewFunction<T>(contractId: string, methodName: string, args: Rec
   return JSON.parse(text) as T;
 }
 
-export async function getNativeNearBalance(accountId: string): Promise<string> {
+export async function getNativeNearBalance(accountId: string, signal?: AbortSignal): Promise<string> {
   const response = await fetch(NEAR_RPC_URL, {
     method: "POST",
+    signal,
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -86,8 +88,8 @@ export async function getFungibleTokenMetadata(contractId: string): Promise<Toke
   return metadata;
 }
 
-export async function getFungibleTokenBalance(contractId: string, accountId: string): Promise<string> {
-  return viewFunction<string>(contractId, "ft_balance_of", { account_id: accountId });
+export async function getFungibleTokenBalance(contractId: string, accountId: string, signal?: AbortSignal): Promise<string> {
+  return viewFunction<string>(contractId, "ft_balance_of", { account_id: accountId }, signal);
 }
 
 export interface TokenStoragePreflight {

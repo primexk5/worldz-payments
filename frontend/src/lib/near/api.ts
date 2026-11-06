@@ -52,6 +52,15 @@ export const nearApi = {
   me() {
     return request<MerchantProfile>("/me");
   },
+  shopifyConnection() {
+    return request<{ shops: { shopDomain: string; scopes: string; installedAtMs: number }[] }>("/shopify/connection");
+  },
+  shopifyCheckout(slug: string) {
+    return request<{ productTitle: string; variantTitle: string; requiresShipping: boolean; networkId: string; asset: PaymentLink["asset"]; amountDisplay: string }>(`/shopify/checkouts/${encodeURIComponent(slug)}`);
+  },
+  saveShopifyBuyerDetails(slug: string, details: { email: string; firstName: string; lastName: string; address1: string; address2: string; city: string; province: string; postalCode: string; countryCode: string; phone: string }) {
+    return request<void>(`/shopify/checkouts/${encodeURIComponent(slug)}`, { method: "PUT", body: body(details) });
+  },
   updateProfile(input: Partial<Pick<MerchantProfile, "displayName" | "webhookUrl">>) {
     return request<MerchantProfile>("/me", { method: "PATCH", body: body(input) });
   },
@@ -64,11 +73,14 @@ export const nearApi = {
   links() {
     return request<{ links: PaymentLink[] }>("/links");
   },
-  allowedAssets() {
-    return request<{ tokens: AllowedFungibleToken[] }>(`/assets?networkId=${NEAR_NETWORK_ID}`);
+  allowedAssets(signal?: AbortSignal) {
+    return request<{ tokens: AllowedFungibleToken[] }>(`/assets?networkId=${NEAR_NETWORK_ID}`, { signal });
   },
   createLink(input: Omit<PaymentLink, "slug" | "createdAtMs" | "claimsUsed" | "merchantId" | "payoutAccountId">) {
     return request<PaymentLink>("/links", { method: "POST", body: body(input) });
+  },
+  deleteLink(slug: string) {
+    return request<void>(`/links/${encodeURIComponent(slug)}`, { method: "DELETE" });
   },
   link(slug: string) {
     return request<PaymentLink>(`/links/${encodeURIComponent(slug)}`);

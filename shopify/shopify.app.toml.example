@@ -1,0 +1,19 @@
+# Copy to shopify.app.toml and replace the app client ID and public origins.
+client_id = "YOUR_SHOPIFY_APP_CLIENT_ID"
+name = "WorldzPayments"
+application_url = "https://worldzpayments.example.com"
+embedded = false
+
+[access_scopes]
+scopes = "read_products,read_orders,write_orders"
+
+[auth]
+redirect_urls = ["https://api.example.com/v1/shopify/callback"]
+
+[app_proxy]
+url = "https://api.example.com/v1/shopify/proxy"
+subpath = "worldz-payments"
+prefix = "apps"
+
+[webhooks]
+api_version = "2026-10"
