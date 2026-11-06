@@ -42,6 +42,8 @@ The Blueprint sets `APP_HOST=0.0.0.0`, `APP_PORT=10000`, and `SESSION_COOKIE_SEC
 
 ### `worldz-payments`
 
+Frontend values are also collected in [`frontend/.env.render.example`](../frontend/.env.render.example).
+
 | Variable | Value |
 | --- | --- |
 | `NEAR_BACKEND_URL` | Blueprint links this to the API service host; the frontend proxy upgrades the host to HTTPS |

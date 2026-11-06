@@ -38,8 +38,12 @@ services:
     envVars:
       - key: NEXT_PUBLIC_NEAR_NETWORK_ID
         value: testnet
+      - key: NEXT_PUBLIC_NEAR_RPC_URL
+        value: https://near-testnet.drpc.org
+      - key: NEXT_PUBLIC_NEAR_EXPLORER_URL
+        value: https://testnet.nearblocks.io
       - key: NEXT_PUBLIC_NEAR_CONTRACT_ID
-        sync: false
+        value: router.newking.testnet
       - key: NEAR_BACKEND_URL
         fromService:
           type: web
