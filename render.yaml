@@ -13,7 +13,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: AUTH_RECIPIENT
-        value: https://worldz-payments.onrender.com
+        value: https://worldz-payments.vercel.app
       - key: SESSION_COOKIE_SECURE
         value: "true"
       - key: NEAR_TESTNET_ROUTER_ID
@@ -28,24 +28,3 @@ services:
         sync: false
       - key: WEBHOOK_SIGNING_SECRET
         sync: false
-  - type: web
-    name: worldz-payments
-    runtime: node
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    startCommand: npm run start -- --hostname 0.0.0.0
-    healthCheckPath: /
-    envVars:
-      - key: NEXT_PUBLIC_NEAR_NETWORK_ID
-        value: testnet
-      - key: NEXT_PUBLIC_NEAR_RPC_URL
-        value: https://near-testnet.drpc.org
-      - key: NEXT_PUBLIC_NEAR_EXPLORER_URL
-        value: https://testnet.nearblocks.io
-      - key: NEXT_PUBLIC_NEAR_CONTRACT_ID
-        value: router.newking.testnet
-      - key: NEAR_BACKEND_URL
-        fromService:
-          type: web
-          name: worldz-near-api
-          property: host

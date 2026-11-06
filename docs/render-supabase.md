@@ -1,9 +1,8 @@
 # Deploy WorldzPayments to Render with Supabase PostgreSQL
 
-The Render Blueprint deploys two services:
+The Render Blueprint deploys the Rust API. The Next.js frontend is hosted separately on Vercel.
 
 - `worldz-near-api`: Rust API in the repository-root Dockerfile.
-- `worldz-payments`: Next.js frontend in `frontend/`, with its `/api/v1` proxy connected to the backend service.
 
 The backend applies its PostgreSQL schema from `backend/migrations/postgres/` on startup. Existing MySQL data is not migrated or copied by this deployment.
 
@@ -23,14 +22,14 @@ The database role must be allowed to create and alter tables and indexes because
 
 ## 2. Create the Render Blueprint
 
-In Render, create a Blueprint from this repository and review `render.yaml`. It creates the API and frontend services. Set the following values in each service's Environment page before the first deploy.
+In Render, create or sync a Blueprint from this repository and review `render.yaml`. It creates the API service. Set the listed values in its Environment page before deploying.
 
-### `worldz-near-api`
+### Render API service: `worldz-near-api`
 
 | Variable | Value |
 | --- | --- |
 | `DATABASE_URL` | Rotated Supabase session-pooler URL, including `sslmode=require` |
-| `AUTH_RECIPIENT` | The public frontend origin, currently `https://worldz-payments.onrender.com` |
+| `AUTH_RECIPIENT` | The public Vercel frontend origin, `https://worldz-payments.vercel.app` |
 | `NEAR_TESTNET_ROUTER_ID` | Deployed Worldz router account |
 | `NEAR_TESTNET_FEE_RECIPIENT` | Configured Testnet fee-recipient account |
 | `NEAR_TESTNET_SIGNER_SEED_BASE64` | Backend-only 32-byte signing seed, standard Base64 |
@@ -40,17 +39,19 @@ In Render, create a Blueprint from this repository and review `render.yaml`. It 
 
 The Blueprint sets `APP_HOST=0.0.0.0`, `APP_PORT=10000`, and `SESSION_COOKIE_SECURE=true` for Render.
 
-### `worldz-payments`
+## Vercel frontend environment
 
-Frontend values are also collected in [`frontend/.env.render.example`](../frontend/.env.render.example).
+Copy values from [`frontend/.env.vercel.example`](../frontend/.env.vercel.example) to the Vercel project's Production environment. Set `NEAR_BACKEND_URL` to the actual public URL of the Render API service; the sample uses `https://worldz-near-api.onrender.com`.
 
 | Variable | Value |
 | --- | --- |
-| `NEAR_BACKEND_URL` | Blueprint links this to the API service host; the frontend proxy upgrades the host to HTTPS |
+| `NEAR_BACKEND_URL` | Public HTTPS Render API service URL |
 | `NEXT_PUBLIC_NEAR_NETWORK_ID` | `testnet` until a separate Mainnet deployment is configured |
+| `NEXT_PUBLIC_NEAR_RPC_URL` | Testnet NEAR RPC endpoint |
+| `NEXT_PUBLIC_NEAR_EXPLORER_URL` | Testnet explorer origin |
 | `NEXT_PUBLIC_NEAR_CONTRACT_ID` | The deployed Testnet router account |
 
-If you change the frontend hostname or add a custom domain, update `AUTH_RECIPIENT` to match the final public frontend origin and redeploy the API.
+After changing Vercel environment values, redeploy the frontend. If you change its hostname or add a custom domain, update Render's `AUTH_RECIPIENT` to the matching Vercel origin and redeploy the API.
 
 ## 3. Confirm deployment
 
