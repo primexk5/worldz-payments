@@ -66,7 +66,7 @@ CREATE TABLE orders (
     network_id VARCHAR(8) NOT NULL,
     contract_id VARCHAR(64) NOT NULL,
     order_key CHAR(64) COLLATE "C" NOT NULL,
-    authorization JSONB NOT NULL,
+    "authorization" JSONB NOT NULL,
     asset JSONB NOT NULL,
     amount VARCHAR(39) NOT NULL,
     fee VARCHAR(39) NOT NULL,

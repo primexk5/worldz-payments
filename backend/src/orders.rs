@@ -129,7 +129,7 @@ pub async fn claim_link(
     let source_asset = serde_json::to_value(&asset).map_err(|_| ApiError::internal())?;
 
     sqlx::query(
-        "INSERT INTO orders (order_id, merchant_id, payer_account_id, network_id, contract_id, order_key, authorization, asset, amount, fee, net, source, link_slug) \
+        "INSERT INTO orders (order_id, merchant_id, payer_account_id, network_id, contract_id, order_key, \"authorization\", asset, amount, fee, net, source, link_slug) \
          VALUES (?,?,?,?,?,?,?,?,?,?,?,'link',?)",
     )
     .bind(&order_id)
