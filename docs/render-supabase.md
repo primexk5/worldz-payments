@@ -3,7 +3,7 @@
 The Render Blueprint deploys two services:
 
 - `worldz-near-api`: Rust API in the repository-root Dockerfile.
-- `worldz-payments-frontend`: Next.js app in `frontend/`, with its `/api/v1` proxy connected to the backend service.
+- `worldz-payments`: Next.js frontend in `frontend/`, with its `/api/v1` proxy connected to the backend service.
 
 The backend applies its PostgreSQL schema from `backend/migrations/postgres/` on startup. Existing MySQL data is not migrated or copied by this deployment.
 
@@ -30,7 +30,7 @@ In Render, create a Blueprint from this repository and review `render.yaml`. It 
 | Variable | Value |
 | --- | --- |
 | `DATABASE_URL` | Rotated Supabase session-pooler URL, including `sslmode=require` |
-| `AUTH_RECIPIENT` | The exact public frontend origin shown in Render, e.g. `https://<your-frontend-host>.onrender.com` |
+| `AUTH_RECIPIENT` | The public frontend origin, currently `https://worldz-payments.onrender.com` |
 | `NEAR_TESTNET_ROUTER_ID` | Deployed Worldz router account |
 | `NEAR_TESTNET_FEE_RECIPIENT` | Configured Testnet fee-recipient account |
 | `NEAR_TESTNET_SIGNER_SEED_BASE64` | Backend-only 32-byte signing seed, standard Base64 |
@@ -40,7 +40,7 @@ In Render, create a Blueprint from this repository and review `render.yaml`. It 
 
 The Blueprint sets `APP_HOST=0.0.0.0`, `APP_PORT=10000`, and `SESSION_COOKIE_SECURE=true` for Render.
 
-### `worldz-payments-frontend`
+### `worldz-payments`
 
 | Variable | Value |
 | --- | --- |
@@ -48,7 +48,7 @@ The Blueprint sets `APP_HOST=0.0.0.0`, `APP_PORT=10000`, and `SESSION_COOKIE_SEC
 | `NEXT_PUBLIC_NEAR_NETWORK_ID` | `testnet` until a separate Mainnet deployment is configured |
 | `NEXT_PUBLIC_NEAR_CONTRACT_ID` | The deployed Testnet router account |
 
-After the first deploy, set `AUTH_RECIPIENT` to the final public frontend origin. If you add a custom domain, update it to match that origin and redeploy the API.
+If you change the frontend hostname or add a custom domain, update `AUTH_RECIPIENT` to match the final public frontend origin and redeploy the API.
 
 ## 3. Confirm deployment
 

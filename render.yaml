@@ -13,7 +13,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: AUTH_RECIPIENT
-        sync: false
+        value: https://worldz-payments.onrender.com
       - key: SESSION_COOKIE_SECURE
         value: "true"
       - key: NEAR_TESTNET_ROUTER_ID
@@ -29,7 +29,7 @@ services:
       - key: WEBHOOK_SIGNING_SECRET
         sync: false
   - type: web
-    name: worldz-payments-frontend
+    name: worldz-payments
     runtime: node
     rootDir: frontend
     buildCommand: npm ci && npm run build
