@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: worldz-near-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: APP_PORT
+        value: "10000"
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_RECIPIENT
+        sync: false
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: NEAR_TESTNET_ROUTER_ID
+        sync: false
+      - key: NEAR_TESTNET_FEE_RECIPIENT
+        sync: false
+      - key: NEAR_TESTNET_SIGNER_SEED_BASE64
+        sync: false
+      - key: NEAR_TESTNET_INDEXER_START_HEIGHT
+        sync: false
+      - key: NEAR_TESTNET_FT_ALLOWLIST
+        sync: false
+      - key: WEBHOOK_SIGNING_SECRET
+        sync: false
+  - type: web
+    name: worldz-payments-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start -- --hostname 0.0.0.0
+    healthCheckPath: /
+    envVars:
+      - key: NEXT_PUBLIC_NEAR_NETWORK_ID
+        value: testnet
+      - key: NEXT_PUBLIC_NEAR_CONTRACT_ID
+        sync: false
+      - key: NEAR_BACKEND_URL
+        fromService:
+          type: web
+          name: worldz-near-api
+          property: host

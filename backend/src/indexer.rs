@@ -5,7 +5,7 @@ use serde_json::Value;
 use sqlx::Row;
 use worldz_near_protocol::NetworkId;
 
-use crate::{near_rpc, orders, state::AppState};
+use crate::{db::sqlx, near_rpc, orders, state::AppState};
 
 const MAX_BLOCKS_PER_TICK: u64 = 4;
 

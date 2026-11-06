@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 
-const backend = process.env.NEAR_BACKEND_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
+const configuredBackend = process.env.NEAR_BACKEND_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL;
+const backend = configuredBackend
+  ? configuredBackend.includes("://") ? configuredBackend : `https://${configuredBackend}`
+  : "http://localhost:8080";
 const allowedMethods = new Set(["GET", "POST", "PATCH", "PUT", "DELETE"]);
 
 async function proxy(request: NextRequest, { params }: { params: Promise<{ path: string[] }> }): Promise<Response> {

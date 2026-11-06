@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
 use reqwest::Client;
-use sqlx::MySqlPool;
+use sqlx::PgPool;
 
 use crate::config::AppConfig;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: MySqlPool,
+    pub pool: PgPool,
     pub config: Arc<AppConfig>,
     pub http: Client,
 }
 
 impl AppState {
-    pub fn new(pool: MySqlPool, config: AppConfig) -> Self {
+    pub fn new(pool: PgPool, config: AppConfig) -> Self {
         Self {
             pool,
             config: Arc::new(config),

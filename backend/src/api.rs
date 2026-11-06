@@ -13,12 +13,13 @@ use rand::{rngs::OsRng, RngCore};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use sqlx::{mysql::MySqlRow, Row};
+use sqlx::{postgres::PgRow, Row};
 use uuid::Uuid;
 use worldz_near_protocol::NetworkId;
 
 use crate::{
     auth,
+    db::sqlx,
     error::ApiError,
     models::{
         ApiKeyDto, AssetDto, ClaimLinkRequest, CreateApiKeyRequest, CreateLinkRequest,
@@ -233,7 +234,7 @@ async fn delete_link(
             .await?;
     if result.rows_affected() == 0 {
         let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM payment_links WHERE slug=? AND merchant_id=?)",
+            "SELECT EXISTS(SELECT 1 FROM payment_links WHERE slug=$1 AND merchant_id=$2)",
         )
         .bind(&slug)
         .bind(&merchant.merchant_id)
@@ -520,7 +521,7 @@ fn normalize_max_redemptions(
     }
 }
 
-fn link_from_row(row: &MySqlRow) -> Result<PaymentLink, ApiError> {
+fn link_from_row(row: &PgRow) -> Result<PaymentLink, ApiError> {
     let asset: AssetDto =
         serde_json::from_value(row.try_get("asset")?).map_err(|_| ApiError::internal())?;
     let network: String = row.try_get("network_id")?;

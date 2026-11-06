@@ -13,11 +13,11 @@ use rand::{rngs::OsRng, RngCore};
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Sha256;
-use sqlx::Row;
+use sqlx::{postgres::PgRow, Row};
 use std::time::Duration as StdDuration;
 use uuid::Uuid;
 
-use crate::{auth, error::ApiError, state::AppState};
+use crate::{auth, db::sqlx, error::ApiError, state::AppState};
 
 use crate::models::AssetDto;
 
@@ -366,7 +366,7 @@ pub async fn proxy_checkout(
         .bind(&slug).bind(&merchant_id).bind(network_id.as_str()).bind(asset).bind(amount.to_string()).bind(amount_display).bind(&display_name).bind(Utc::now() + Duration::minutes(30))
         .execute(&mut *tx).await?;
     sqlx::query("INSERT INTO shopify_checkout_sessions (slug,shop_domain,variant_id,quantity,product_title,variant_title,unit_price,currency_code,requires_shipping) VALUES (?,?,?,?,?,?,?,?,?)")
-        .bind(&slug).bind(&shop).bind(variant_number.to_string()).bind(quantity).bind(title).bind(variant_title).bind(price).bind(currency).bind(requires_shipping)
+        .bind(&slug).bind(&shop).bind(variant_number.to_string()).bind(quantity as i32).bind(title).bind(variant_title).bind(price).bind(currency).bind(requires_shipping)
         .execute(&mut *tx).await?;
     tx.commit().await?;
     let checkout_base = state
@@ -413,7 +413,7 @@ fn verify_proxy_signature(
     Ok(())
 }
 
-fn decrypt_access_token(state: &AppState, row: &sqlx::mysql::MySqlRow) -> Result<String, ApiError> {
+fn decrypt_access_token(state: &AppState, row: &PgRow) -> Result<String, ApiError> {
     let key = state
         .config
         .shopify_token_encryption_key
@@ -452,7 +452,7 @@ pub fn spawn_order_sync_worker(state: AppState) {
         let mut interval = tokio::time::interval(StdDuration::from_secs(15));
         loop {
             interval.tick().await;
-            if let Err(error) = sqlx::query("UPDATE shopify_order_sync SET state='pending', next_attempt_at=UTC_TIMESTAMP(6) WHERE state='processing' AND updated_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE)")
+            if let Err(error) = sqlx::query("UPDATE shopify_order_sync SET state='pending', next_attempt_at=UTC_TIMESTAMP(6) WHERE state='processing' AND updated_at < UTC_TIMESTAMP(6) - INTERVAL '5 minutes'")
                 .execute(&state.pool).await {
                 tracing::warn!(%error, "could not recover stale Shopify order sync jobs");
             }
@@ -489,7 +489,7 @@ pub fn spawn_order_sync_worker(state: AppState) {
                     }
                     Err(error) => {
                         let message: String = error.to_string().chars().take(400).collect();
-                        let _ = sqlx::query("UPDATE shopify_order_sync SET state=IF(attempts>=12,'failed','pending'), last_error=?, next_attempt_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL LEAST(POW(2,LEAST(attempts,10)),3600) SECOND), updated_at=UTC_TIMESTAMP(6) WHERE slug=?")
+                        let _ = sqlx::query("UPDATE shopify_order_sync SET state=CASE WHEN attempts>=12 THEN 'failed' ELSE 'pending' END, last_error=?, next_attempt_at=UTC_TIMESTAMP(6) + (LEAST(POWER(2,LEAST(attempts,10)),3600) * INTERVAL '1 second'), updated_at=UTC_TIMESTAMP(6) WHERE slug=?")
                             .bind(message).bind(&slug).execute(&state.pool).await;
                         tracing::warn!(%slug, error = %error, "Shopify order creation deferred");
                     }
@@ -531,7 +531,7 @@ async fn sync_shopify_order(state: &AppState, slug: &str) -> Result<String, ApiE
     }
 
     let variant_id: String = row.try_get("variant_id")?;
-    let quantity: u32 = row.try_get("quantity")?;
+    let quantity: i32 = row.try_get("quantity")?;
     let unit_price: String = row.try_get("unit_price")?;
     let currency: String = row.try_get("currency_code")?;
     let product_title: String = row.try_get("product_title")?;
@@ -738,7 +738,7 @@ pub async fn callback(
         .encrypt(&nonce_value, access_token.as_bytes())
         .map_err(|_| ApiError::internal())?;
     let merchant_id: String = state_row.try_get("merchant_id")?;
-    sqlx::query("INSERT INTO shopify_shops (shop_domain, merchant_id, access_token_ciphertext, access_token_nonce, scopes) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE merchant_id=VALUES(merchant_id), access_token_ciphertext=VALUES(access_token_ciphertext), access_token_nonce=VALUES(access_token_nonce), scopes=VALUES(scopes), updated_at=UTC_TIMESTAMP(6)")
+    sqlx::query("INSERT INTO shopify_shops (shop_domain, merchant_id, access_token_ciphertext, access_token_nonce, scopes) VALUES (?,?,?,?,?) ON CONFLICT (shop_domain) DO UPDATE SET merchant_id=EXCLUDED.merchant_id, access_token_ciphertext=EXCLUDED.access_token_ciphertext, access_token_nonce=EXCLUDED.access_token_nonce, scopes=EXCLUDED.scopes, updated_at=UTC_TIMESTAMP(6)")
         .bind(&shop).bind(merchant_id).bind(ciphertext).bind(nonce.as_slice()).bind(scopes)
         .execute(&state.pool).await?;
     Ok((

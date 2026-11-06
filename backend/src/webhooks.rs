@@ -7,7 +7,7 @@ use sqlx::Row;
 use tokio::net::lookup_host;
 use url::Url;
 
-use crate::state::AppState;
+use crate::{db::sqlx, state::AppState};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -57,7 +57,7 @@ async fn deliver_batch(state: &AppState) -> Result<(), Box<dyn std::error::Error
                     "pending"
                 };
                 let delay = (2i64.pow(next_attempt.min(10) as u32)).min(3600);
-                sqlx::query("UPDATE webhook_deliveries SET state=?, attempts=?, last_error=?, next_attempt_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND), updated_at=UTC_TIMESTAMP(6) WHERE delivery_id=?")
+                sqlx::query("UPDATE webhook_deliveries SET state=?, attempts=?, last_error=?, next_attempt_at=UTC_TIMESTAMP(6) + (? * INTERVAL '1 second'), updated_at=UTC_TIMESTAMP(6) WHERE delivery_id=?")
                     .bind(state_value)
                     .bind(next_attempt)
                     .bind(clipped)

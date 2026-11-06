@@ -17,10 +17,11 @@ use base64::{
     Engine,
 };
 use near_account_id::AccountId;
-use sqlx::{mysql::MySqlRow, Row};
+use sqlx::{postgres::PgRow, Row};
 use uuid::Uuid;
 
 use crate::{
+    db::sqlx,
     error::ApiError,
     models::{
         AuthSessionDto, ChallengePurpose, ChallengeRequest, ChallengeResponse, LoginRequest,
@@ -91,8 +92,8 @@ pub async fn issue_challenge(
     sqlx::query(
         "INSERT INTO auth_challenges (account_id, state, network_id, purpose, message, nonce, intent, expires_at) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
-         ON DUPLICATE KEY UPDATE network_id = VALUES(network_id), purpose = VALUES(purpose), \
-           message = VALUES(message), nonce = VALUES(nonce), intent = VALUES(intent), expires_at = VALUES(expires_at), consumed_at = NULL",
+         ON CONFLICT (account_id, state) DO UPDATE SET network_id = EXCLUDED.network_id, purpose = EXCLUDED.purpose, \
+           message = EXCLUDED.message, nonce = EXCLUDED.nonce, intent = EXCLUDED.intent, expires_at = EXCLUDED.expires_at, consumed_at = NULL",
     )
     .bind(account_id.as_str())
     .bind(&input.state)
@@ -270,7 +271,7 @@ pub async fn update_profile(
     let webhook_value = webhook_url.flatten();
     sqlx::query(
         "UPDATE merchants SET display_name = COALESCE(?, display_name), \
-         webhook_url = IF(?, ?, webhook_url), updated_at = UTC_TIMESTAMP(6) \
+         webhook_url = CASE WHEN ? THEN ? ELSE webhook_url END, updated_at = UTC_TIMESTAMP(6) \
          WHERE merchant_id = ?",
     )
     .bind(display_name.map(|value| value.trim().to_owned()))
@@ -410,9 +411,9 @@ async fn enforce_rate_limit(
 ) -> Result<(), ApiError> {
     sqlx::query(
         "INSERT INTO auth_rate_limits (subject, window_started_at, attempts) VALUES (?, UTC_TIMESTAMP(6), 1) \
-         ON DUPLICATE KEY UPDATE \
-           attempts = IF(window_started_at < UTC_TIMESTAMP(6) - INTERVAL 15 MINUTE, 1, attempts + 1), \
-           window_started_at = IF(window_started_at < UTC_TIMESTAMP(6) - INTERVAL 15 MINUTE, UTC_TIMESTAMP(6), window_started_at)",
+         ON CONFLICT (subject) DO UPDATE SET \
+           attempts = CASE WHEN auth_rate_limits.window_started_at < UTC_TIMESTAMP(6) - INTERVAL '15 minutes' THEN 1 ELSE auth_rate_limits.attempts + 1 END, \
+           window_started_at = CASE WHEN auth_rate_limits.window_started_at < UTC_TIMESTAMP(6) - INTERVAL '15 minutes' THEN UTC_TIMESTAMP(6) ELSE auth_rate_limits.window_started_at END",
     )
     .bind(subject)
     .execute(&state.pool)
@@ -639,7 +640,7 @@ fn hash_token(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
 }
 
-fn merchant_from_row(row: &MySqlRow) -> MerchantProfile {
+fn merchant_from_row(row: &PgRow) -> MerchantProfile {
     MerchantProfile {
         merchant_id: row.get("merchant_id"),
         account_id: row.get("account_id"),

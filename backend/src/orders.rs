@@ -6,7 +6,7 @@ use ed25519_dalek::Signer;
 use hex::encode as hex_encode;
 use rand::{rngs::OsRng, RngCore};
 use serde_json::{json, Value};
-use sqlx::{mysql::MySqlRow, Row};
+use sqlx::{postgres::PgRow, Row};
 use worldz_near_protocol::{
     AuthorizationPayload, NetworkId, OrderState, SignedAuthorization, AUTH_PROTOCOL_VERSION,
     DEFAULT_FEE_BPS,
@@ -14,6 +14,7 @@ use worldz_near_protocol::{
 
 use crate::{
     api::decimal_to_base_units,
+    db::sqlx,
     error::ApiError,
     models::{AssetDto, LinkClaimDto, OrderStatusDto, PaymentEventDto, PaymentMetaRequest},
     near_rpc,
@@ -320,7 +321,7 @@ pub fn spawn_reconciliation_worker(state: AppState) {
     });
 }
 
-pub async fn reconcile_order(state: &AppState, row: &MySqlRow) -> Result<(), ApiError> {
+pub async fn reconcile_order(state: &AppState, row: &PgRow) -> Result<(), ApiError> {
     let network_id = parse_network(&row.try_get::<String, _>("network_id")?)?;
     let transaction_hash: String = row
         .try_get::<Option<String>, _>("reconciliation_tx_hash")
@@ -555,7 +556,7 @@ pub async fn reconcile_order(state: &AppState, row: &MySqlRow) -> Result<(), Api
 
 async fn validate_submission(
     state: &AppState,
-    order: &MySqlRow,
+    order: &PgRow,
     transaction_hash: &str,
     network_id: NetworkId,
 ) -> Result<(), ApiError> {
@@ -607,7 +608,7 @@ fn leg_succeeded(order: &Value, leg_name: &str) -> bool {
         == Some("succeeded")
 }
 
-fn order_status_from_row(row: &MySqlRow) -> Result<OrderStatusDto, ApiError> {
+fn order_status_from_row(row: &PgRow) -> Result<OrderStatusDto, ApiError> {
     let network_id = parse_network(&row.try_get::<String, _>("network_id")?)?;
     let asset: AssetDto =
         serde_json::from_value(row.try_get("asset")?).map_err(|_| ApiError::internal())?;

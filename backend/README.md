@@ -4,13 +4,19 @@ Axum API for merchant auth, payment links, payment reconciliation, API keys, and
 
 ## Local run
 
-1. Start MySQL 8.0.16+ and use the existing `worldz_payments` database with a restricted application user that has migration privileges.
-2. Copy `.env.example` to `.env` and set `DATABASE_URL` to that user's local connection, plus `AUTH_RECIPIENT` and the TestNet router, fee recipient, and signer settings. Set `NEAR_TESTNET_INDEXER_START_HEIGHT` to the router deployment block height so finalized events are indexed from contract creation.
+1. Create a PostgreSQL database (Supabase is supported) and use its direct or session-pooler connection URL with SSL enabled. The database user needs privileges to create tables and indexes for startup migrations.
+2. Copy `.env.example` to `.env` and set `DATABASE_URL` to the PostgreSQL connection URL, plus `AUTH_RECIPIENT` and the TestNet router, fee recipient, and signer settings. Set `NEAR_TESTNET_INDEXER_START_HEIGHT` to the router deployment block height so finalized events are indexed from contract creation.
 3. Run `cargo run -p worldz-near-api --bin worldz-near-api` from the workspace root. SQL migrations are applied at startup.
 4. Read `/v1/network-config?networkId=testnet` and configure its `signerKeyId`/`signerPublicKeyBase64` on the router with the router admin account. The endpoint returns only the public key. The server's `NEAR_TESTNET_SIGNER_SEED_BASE64` must be the corresponding 32-byte Ed25519 seed, standard-base64 encoded.
 5. Configure allowlisted FT contract IDs in `NEAR_TESTNET_FT_ALLOWLIST`; the API reads each token's `ft_metadata` from NEAR RPC.
 
-`/healthz` checks process liveness. `/readyz` checks MySQL readiness. Keep `SESSION_COOKIE_SECURE=false` only for local HTTP development. Real `.env` files and signing seeds must never be committed. For production, inject secrets through a secret manager and use a KMS-backed signer rather than a static environment seed.
+The API now uses PostgreSQL. The SQL files directly under `migrations/` are the legacy MySQL schema; startup applies the PostgreSQL schema from `migrations/postgres/`. Existing MySQL data is not copied automatically.
+
+## Render and Supabase
+
+The repository includes a Render Blueprint (`render.yaml`) and backend Dockerfile. See [`../docs/render-supabase.md`](../docs/render-supabase.md) for the Render environment variables, Supabase pooler URL format and initial deployment steps. Do not commit the Supabase connection URL or any signing key.
+
+`/healthz` checks process liveness. `/readyz` checks PostgreSQL readiness. Keep `SESSION_COOKIE_SECURE=false` only for local HTTP development. Real `.env` files and signing seeds must never be committed. For production, inject secrets through a secret manager and use a KMS-backed signer rather than a static environment seed.
 
 ## Settlement model
 

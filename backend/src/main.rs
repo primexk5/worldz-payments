@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod config;
+mod db;
 mod error;
 mod indexer;
 mod models;
@@ -11,11 +12,10 @@ mod state;
 mod webhooks;
 
 use std::net::SocketAddr;
-use std::str::FromStr;
 
 use axum::{routing::get, Router};
 use config::AppConfig;
-use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+use sqlx::postgres::PgPoolOptions;
 use state::AppState;
 use tower_http::{limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing_subscriber::EnvFilter;
@@ -30,13 +30,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = AppConfig::from_env()?;
-    let options =
-        MySqlConnectOptions::from_str(&config.database_url)?.timezone("+00:00".to_owned());
-    let pool = MySqlPoolOptions::new()
-        .max_connections(20)
-        .connect_with(options)
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&config.database_url)
         .await?;
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    sqlx::migrate!("./migrations/postgres").run(&pool).await?;
 
     let address = SocketAddr::new(config.host, config.port);
     let state = AppState::new(pool, config);
