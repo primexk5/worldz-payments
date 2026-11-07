@@ -291,7 +291,7 @@ const link = await nearApi.createLink({
   multiPay: false,
   maxRedemptions: 1,
 });
-const paymentUrl = new URL("/pay/" + link.slug, window.location.origin);
+const paymentUrl = new URL("/pay/" + link.slug, process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin);
 console.log(paymentUrl.toString());
 ```
 
@@ -385,7 +385,7 @@ if (!response.ok) {
   throw new Error(problem.error ?? "Could not create a payment link");
 }
 const link = await response.json(); // HTTP 201; PaymentLink object
-const paymentUrl = new URL("/pay/" + link.slug, window.location.origin);
+const paymentUrl = new URL("/pay/" + link.slug, process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin);
 console.log(paymentUrl.toString());
 ```
 

@@ -17,6 +17,13 @@ export const NEAR_EXPLORER_URL =
   (NEAR_NETWORK_ID === "testnet"
     ? "https://testnet.nearblocks.io"
     : "https://nearblocks.io");
+export const PUBLIC_APP_URL = process.env.NEXT_PUBLIC_APP_URL
+  ?? (process.env.NODE_ENV === "production" ? "https://worldz-payments.vercel.app" : "");
+
+export function getPublicAppUrl(path: string): string {
+  return PUBLIC_APP_URL ? new URL(path, PUBLIC_APP_URL).toString() : path;
+}
+
 export const NEAR_CONTRACT_ID = process.env.NEXT_PUBLIC_NEAR_CONTRACT_ID ?? "";
 export const NEAR_NATIVE_ASSET = { type: "native", symbol: "NEAR", decimals: 24 } as const;
 

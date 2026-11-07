@@ -50,6 +50,7 @@ Copy values from [`frontend/.env.vercel.example`](../frontend/.env.vercel.exampl
 | `NEXT_PUBLIC_NEAR_RPC_URL` | Testnet NEAR RPC endpoint |
 | `NEXT_PUBLIC_NEAR_EXPLORER_URL` | Testnet explorer origin |
 | `NEXT_PUBLIC_NEAR_CONTRACT_ID` | The deployed Testnet router account |
+| `NEXT_PUBLIC_APP_URL` | `https://worldz-payments.vercel.app`; use the same canonical origin in Production and Preview to keep shared links off protected preview URLs |
 
 After changing Vercel environment values, redeploy the frontend. If you change its hostname or add a custom domain, update Render's `AUTH_RECIPIENT` to the matching Vercel origin and redeploy the API.
 

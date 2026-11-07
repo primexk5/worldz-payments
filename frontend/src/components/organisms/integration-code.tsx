@@ -23,7 +23,8 @@ const lines = [
   '});',
   '',
   'const paymentUrl = new URL(',
-  '  `/pay/${link.slug}`, window.location.origin',
+  '  `/pay/${link.slug}`,',
+  '  process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin',
   ');',
 ];
 

@@ -166,7 +166,7 @@ const link = await nearApi.createLink({
   multiPay: false,
   maxRedemptions: 1,
 });
-const paymentUrl = new URL("/pay/" + link.slug, window.location.origin);
+const paymentUrl = new URL("/pay/" + link.slug, process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin);
 console.log(paymentUrl.toString());` },
       { type: "paragraph", text: "For another application, use the REST contracts below and your deployment’s configured origin. The /api/v1 prefix is this site’s same-origin proxy. Calling a different origin also requires compatible CORS and session-cookie configuration." },
     ],
@@ -218,7 +218,7 @@ if (!response.ok) {
   throw new Error(problem.error ?? "Could not create a payment link");
 }
 const link = await response.json(); // HTTP 201; PaymentLink object
-const paymentUrl = new URL("/pay/" + link.slug, window.location.origin);
+const paymentUrl = new URL("/pay/" + link.slug, process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin);
 console.log(paymentUrl.toString());` },
       { type: "table", headers: ["Field", "Required value / meaning"], rows: [["networkId", "testnet or mainnet, matching the configured deployment."], ["asset", "Native NEAR: type native, symbol NEAR, decimals 24. For NEP-141 include the allowed contractId, symbol and decimals."], ["amount", "Positive base-unit integer string, within the supported u128 range."], ["amountDisplay", "Matching decimal string, e.g. 25. No scientific notation or silent rounding."], ["displayName", "Item/service description, up to 80 characters. An empty string is allowed."], ["expiresAtSeconds", "A future Unix timestamp in seconds, or null for no link expiry."], ["multiPay", "false for one claim; true for repeated claims."], ["maxRedemptions", "1 for a single-use link; a positive count for a limited repeated link; 0 or null for unlimited repeated claims."]] },
       { type: "paragraph", text: "The response includes slug, merchantId, payoutAccountId, asset, amount, displayName, expiry and claim counts. Construct the hosted payment URL from the returned slug; a checkoutUrl field is not returned." },
