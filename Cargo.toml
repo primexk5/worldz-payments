@@ -28,4 +28,4 @@ lto = true
 codegen-units = 1
 panic = "abort"
 overflow-checks = true
-strip = "debuginfo"
+strip = "symbols"
