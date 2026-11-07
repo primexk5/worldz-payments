@@ -85,10 +85,10 @@ export const nearApi = {
   link(slug: string) {
     return request<PaymentLink>(`/links/${encodeURIComponent(slug)}`);
   },
-  claimLink(slug: string, payerAccountId: string) {
+  claimLink(slug: string, payerAccountId: string, customerName?: string) {
     return request<LinkClaim>(`/links/${encodeURIComponent(slug)}/claim`, {
       method: "POST",
-      body: body({ payerAccountId, networkId: NEAR_NETWORK_ID }),
+      body: body({ payerAccountId, networkId: NEAR_NETWORK_ID, customerName: customerName?.trim() || undefined }),
     });
   },
   paymentReadiness() {

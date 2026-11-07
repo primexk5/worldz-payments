@@ -265,7 +265,14 @@ async fn claim_link(
         .payer_account_id
         .parse::<near_account_id::AccountId>()
         .map_err(|_| ApiError::bad_request("Invalid payer account ID."))?;
-    let claim = orders::claim_link(&state, &slug, input.network_id, payer.as_str()).await?;
+    let claim = orders::claim_link(
+        &state,
+        &slug,
+        input.network_id,
+        payer.as_str(),
+        input.customer_name.as_deref(),
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(claim)))
 }
 

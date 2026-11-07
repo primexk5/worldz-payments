@@ -36,8 +36,15 @@ Update the checker and readiness function if the contract storage layout changes
 
 ## Recover an existing failed checkout
 
+The website proxy preserves successful HTTP 204 responses with a null body.
+Attaching even an empty buffer to a 204 response throws in the Fetch API and
+previously displayed a false "NEAR merchant API is unreachable" error for both
+name saves and payment readiness checks. Regression tests cover these responses.
+
 The checkout saves the customer name before a wallet redirect and lets the
-customer save it while checking a payment's status. Wallet callback hashes are
+customer edit it while checking a payment's status. The name is saved as part of
+creating or reusing the order, and later edits save automatically with background
+retries. There is no separate receipt-name save button. Wallet callback hashes are
 restored automatically. If the wallet returned an error without a hash, copy the
 transaction hash from wallet history into **Wallet transaction hash** and select
 **Check payment status**. For the latest observed failed payment, the hash is:

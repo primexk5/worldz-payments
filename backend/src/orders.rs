@@ -26,7 +26,9 @@ pub async fn claim_link(
     slug: &str,
     network_id: NetworkId,
     payer_account_id: &str,
+    customer_name: Option<&str>,
 ) -> Result<LinkClaimDto, ApiError> {
+    let customer_name = normalized_customer_name(customer_name)?;
     let payer = payer_account_id
         .parse::<near_account_id::AccountId>()
         .map_err(|_| ApiError::bad_request("Invalid payer account ID."))?;
@@ -77,8 +79,8 @@ pub async fn claim_link(
         let mut authorization = serde_json::to_value(&signed).map_err(|_| ApiError::internal())?;
         authorization["asset"] = row.try_get("asset")?;
         let order_id: String = existing.try_get("order_id")?;
-        sqlx::query("UPDATE orders SET \"authorization\" = ?, updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?")
-            .bind(&authorization).bind(&order_id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE orders SET \"authorization\" = ?, customer_name = COALESCE(?, customer_name), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?")
+            .bind(&authorization).bind(customer_name).bind(&order_id).execute(&mut *tx).await?;
         tx.commit().await?;
         return Ok(LinkClaimDto {
             order_id,
@@ -161,8 +163,8 @@ pub async fn claim_link(
     let source_asset = serde_json::to_value(&asset).map_err(|_| ApiError::internal())?;
 
     sqlx::query(
-        "INSERT INTO orders (order_id, merchant_id, payer_account_id, network_id, contract_id, order_key, \"authorization\", asset, amount, fee, net, source, link_slug) \
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,'link',?)",
+        "INSERT INTO orders (order_id, merchant_id, payer_account_id, network_id, contract_id, order_key, \"authorization\", asset, amount, fee, net, source, link_slug, customer_name) \
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,'link',?,?)",
     )
     .bind(&order_id)
     .bind(&merchant_id)
@@ -176,6 +178,7 @@ pub async fn claim_link(
     .bind(fee.to_string())
     .bind(net.to_string())
     .bind(slug)
+    .bind(customer_name)
     .execute(&mut *tx)
     .await?;
 
@@ -199,6 +202,16 @@ pub async fn claim_link(
         payer_account_id: payer.to_string(),
         authorization,
     })
+}
+
+fn normalized_customer_name(name: Option<&str>) -> Result<Option<&str>, ApiError> {
+    let name = name.map(str::trim).filter(|name| !name.is_empty());
+    if name.is_some_and(|name| name.chars().count() > 120) {
+        return Err(ApiError::bad_request(
+            "Payer name must contain at most 120 characters.",
+        ));
+    }
+    Ok(name)
 }
 
 fn renew_authorization(
@@ -267,15 +280,7 @@ pub async fn update_order_meta(
     order_id: &str,
     input: PaymentMetaRequest,
 ) -> Result<(), ApiError> {
-    if input
-        .customer_name
-        .as_deref()
-        .is_some_and(|name| name.trim().chars().count() > 120)
-    {
-        return Err(ApiError::bad_request(
-            "Payer name must contain at most 120 characters.",
-        ));
-    }
+    let customer_name = normalized_customer_name(input.customer_name.as_deref())?;
     let row = sqlx::query(
         "SELECT * FROM orders WHERE merchant_id = ? AND order_id = ? AND network_id = ?",
     )
@@ -313,13 +318,7 @@ pub async fn update_order_meta(
     .bind(tx_hash)
     .bind(tx_hash)
     .bind(tx_hash)
-    .bind(
-        input
-            .customer_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty()),
-    )
+    .bind(customer_name)
     .bind(merchant_id)
     .bind(order_id)
     .bind(input.network_id.as_str())
@@ -812,10 +811,42 @@ fn parse_network(value: &str) -> Result<NetworkId, ApiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{failed_before_processing, leg_succeeded, renew_authorization, submission_matches};
+    use super::{
+        failed_before_processing, leg_succeeded, normalized_customer_name, renew_authorization,
+        submission_matches,
+    };
     use base64::{engine::general_purpose::STANDARD, Engine};
     use serde_json::json;
     use worldz_near_protocol::SignedAuthorization;
+
+    #[test]
+    fn customer_names_are_trimmed_and_validated_before_creating_an_order() {
+        assert_eq!(
+            normalized_customer_name(Some("  Yusef  ")).unwrap(),
+            Some("Yusef")
+        );
+        assert_eq!(normalized_customer_name(Some("   ")).unwrap(), None);
+        assert_eq!(normalized_customer_name(None).unwrap(), None);
+        let valid = "é".repeat(120);
+        assert_eq!(
+            normalized_customer_name(Some(&valid)).unwrap(),
+            Some(valid.as_str())
+        );
+        assert!(normalized_customer_name(Some(&"é".repeat(121))).is_err());
+    }
+
+    #[test]
+    fn claim_requests_accept_an_optional_customer_name() {
+        let request =
+            json!({"payerAccountId":"payer.testnet","networkId":"testnet","customerName":"Yusef"});
+        let named: crate::models::ClaimLinkRequest =
+            serde_json::from_value(request.clone()).unwrap();
+        assert_eq!(named.customer_name.as_deref(), Some("Yusef"));
+        let mut legacy = request;
+        legacy.as_object_mut().unwrap().remove("customerName");
+        let legacy: crate::models::ClaimLinkRequest = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.customer_name.is_none());
+    }
 
     #[test]
     fn renewing_an_expired_claim_keeps_the_same_replay_key() {

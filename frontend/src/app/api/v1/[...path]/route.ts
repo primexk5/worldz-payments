@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { proxyResponse } from "@/lib/near/proxy-response";
 
 const configuredBackend = process.env.NEAR_BACKEND_URL ?? process.env.NEXT_PUBLIC_BACKEND_URL;
 const backend = configuredBackend
@@ -23,10 +24,7 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path:
       cache: "no-store",
       signal: AbortSignal.timeout(45_000),
     });
-    const responseHeaders = new Headers(upstream.headers);
-    responseHeaders.delete("content-encoding");
-    responseHeaders.delete("content-length");
-    return new Response(await upstream.arrayBuffer(), { status: upstream.status, headers: responseHeaders });
+    return await proxyResponse(upstream);
   } catch {
     return Response.json({ error: "NEAR merchant API is unreachable." }, { status: 502 });
   }

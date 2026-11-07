@@ -244,6 +244,7 @@ pub struct CreateLinkRequest {
 pub struct ClaimLinkRequest {
     pub payer_account_id: String,
     pub network_id: NetworkId,
+    pub customer_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
