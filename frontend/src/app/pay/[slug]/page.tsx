@@ -49,7 +49,10 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
     try{
       const currentClaim=claim??await nearApi.claimLink(slug,accountId);
       setClaim(currentClaim);
-      if(customerName.trim())await nearApi.submitPaymentMeta(currentClaim.merchantId,currentClaim.orderId,customerName.trim(),slug);
+      if(customerName.trim()){
+        try{await nearApi.submitPaymentMeta(currentClaim.merchantId,currentClaim.orderId,customerName.trim(),slug);}
+        catch{setMessage("The optional receipt name could not be saved. You can still continue; the receipt may not show your name.");}
+      }
       const submitted=await submitAuthorizedPayment({wallet,accountId,claim:currentClaim,linkSlug:slug,onSubmitted:(value)=>{setPending(value);setState("processing");}});
       setPending(submitted);
       await checkStatus(submitted);
