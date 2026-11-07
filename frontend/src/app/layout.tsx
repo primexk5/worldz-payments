@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { SiteChrome } from "@/components/organisms/site-chrome";
 import { NearWalletProvider } from "@/components/providers/near-wallet-provider";
+import { PrivacyNotice } from "@/components/organisms/privacy-notice";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -38,7 +39,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col"><NearWalletProvider><Suspense fallback={children}><SiteChrome>{children}</SiteChrome></Suspense></NearWalletProvider></body>
+      <body className="min-h-full flex flex-col"><NearWalletProvider><Suspense fallback={children}><SiteChrome>{children}</SiteChrome></Suspense></NearWalletProvider><PrivacyNotice /></body>
     </html>
   );
 }

@@ -7,7 +7,7 @@ import { SiteFooter } from "@/components/organisms/site-footer";
 
 function isFocusedFlow(pathname: string): boolean {
   return pathname.startsWith("/dashboard") || pathname.startsWith("/pay/") ||
-    pathname.startsWith("/checkout/") || pathname === "/login" || pathname === "/onboarding" || pathname === "/terms" || pathname === "/brand-concepts";
+    pathname.startsWith("/checkout/") || pathname === "/login" || pathname === "/onboarding" || pathname === "/terms" || pathname === "/privacy" || pathname === "/brand-concepts";
 }
 
 export function SiteChrome({ children }: { children: ReactNode }) {
