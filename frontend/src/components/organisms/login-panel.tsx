@@ -38,6 +38,6 @@ export function LoginPanel({nextPath="/dashboard"}:{nextPath?:string}) {
     <Button onClick={()=>void (accountId?signIn():connectWallet())} disabled={signing||connecting} className="mt-5 h-[46px] w-full gap-2 rounded-[12px] text-sm shadow-sm">{signing||connecting?<LoaderCircle size={17} className="animate-spin"/>:<NearLogo className="size-4"/>} {signing?"Approve sign-in in your wallet":connecting?"Connecting wallet…":accountId?"Sign in with NEAR":"Connect NEAR wallet"}{!signing&&!connecting&&<ArrowRight size={16} className="ml-auto"/>}</Button>
     <div className="my-5 flex items-center gap-3"><div className="h-px flex-1 bg-line"/><span className="text-xs text-mist">Secure by design</span><div className="h-px flex-1 bg-line"/></div>
     <p className="flex gap-3 text-xs leading-6 text-mist"><ShieldCheck size={18} className="mt-1 shrink-0 text-ink"/>Approve a one-time message to verify wallet ownership. No password to remember and no transaction to send.</p>
-    <p className="mt-5 text-xs leading-5 text-mist">By continuing, you agree to our <Link href="/terms" className="font-medium text-ink underline underline-offset-4">Terms & privacy notice</Link>.</p>
+    <p className="mt-5 text-xs leading-5 text-mist">By continuing, you agree to our <Link href="/terms" className="font-medium text-ink underline underline-offset-4">Terms of service</Link> and acknowledge our <Link href="/privacy" className="text-ink underline underline-offset-4">Privacy notice</Link>.</p>
   </AuthLayout>;
 }

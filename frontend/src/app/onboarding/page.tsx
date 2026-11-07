@@ -65,6 +65,6 @@ export default function OnboardingPage() {
       {error&&<p role="alert" className="rounded-lg border border-alert/20 bg-alert/5 p-3 text-sm text-alert">{error}</p>}
       <Button type="submit" disabled={busy||!accountId} className="h-[46px] w-full rounded-full">{busy?<LoaderCircle size={17} className="animate-spin"/>:<ShieldCheck size={17}/>} {busy?"Approve in your wallet…":"Create your workspace"}<ArrowRight size={16} className="ml-auto"/></Button>
     </form>
-    <p className="mt-4 text-xs leading-5 text-mist">Your wallet verifies your identity. By creating an account, you agree to our <Link href="/terms" className="text-ink underline underline-offset-4">Terms & privacy notice</Link>.</p>
+    <p className="mt-4 text-xs leading-5 text-mist">Your wallet verifies your identity. By creating an account, you agree to our <Link href="/terms" className="text-ink underline underline-offset-4">Terms of service</Link> and acknowledge our <Link href="/privacy" className="text-ink underline underline-offset-4">Privacy notice</Link>.</p>
   </AuthLayout>;
 }

@@ -51,7 +51,7 @@ export function PrivacyNotice() {
       </div>
       <p className="mt-4 text-sm leading-6 text-ink/70">We use essential cookies and browser storage to keep you signed in, remember checkout details, and recover payments. This site currently uses no advertising or analytics cookies.</p>
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Link href="/privacy" className="inline-flex min-h-11 items-center gap-2 text-xs font-medium text-green-deep underline underline-offset-4"><ShieldCheck size={15} aria-hidden="true" />Read our privacy & cookie notice</Link>
+        <div><Link href="/privacy" className="inline-flex min-h-11 items-center gap-2 text-xs font-medium text-green-deep underline underline-offset-4"><ShieldCheck size={15} aria-hidden="true" />Privacy & cookies</Link><Link href="/terms#acceptable-use" className="ml-4 inline-flex min-h-11 items-center text-xs font-medium text-green-deep underline underline-offset-4">Rules of use</Link></div>
         <button type="button" onClick={dismiss} className="min-h-11 rounded-full bg-ink px-5 py-3 text-xs font-medium text-paper transition hover:bg-ink/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-deep">Continue with essential cookies</button>
       </div>
     </section>
