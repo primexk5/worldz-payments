@@ -30,6 +30,7 @@ pub async fn claim_link(
     let payer = payer_account_id
         .parse::<near_account_id::AccountId>()
         .map_err(|_| ApiError::bad_request("Invalid payer account ID."))?;
+    near_rpc::verify_order_signer(state, network_id).await?;
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query(
         "SELECT l.*, m.account_id AS merchant_account_id, m.payout_account_id AS payout_account_id \
@@ -54,13 +55,44 @@ pub async fn claim_link(
     }
     let claims_used: i32 = row.try_get("claims_used")?;
     let max_redemptions: Option<i32> = row.try_get("max_redemptions")?;
+    let network = state.config.network(network_id);
+    // Reuse the unpaid order's nonce/replay key. This permits a failed or expired
+    // authorization to be renewed without consuming a second link redemption,
+    // while an older wallet submission still cannot pay the order twice.
+    let existing = sqlx::query("SELECT order_id, merchant_id, payer_account_id, \"authorization\" FROM orders WHERE link_slug = ? AND network_id = ? AND payer_account_id = ? AND contract_id = ? AND state = 'OPEN' ORDER BY created_at DESC LIMIT 1 FOR UPDATE")
+        .bind(slug).bind(network_id.as_str()).bind(payer.as_str())
+        .bind(network.router_id.as_deref().unwrap_or_default())
+        .fetch_optional(&mut *tx).await?;
+    if let Some(existing) = existing {
+        let mut signed: SignedAuthorization =
+            serde_json::from_value(existing.try_get("authorization")?)
+                .map_err(|_| ApiError::internal())?;
+        let signer = network.signer.as_ref().ok_or_else(ApiError::internal)?;
+        renew_authorization(
+            &mut signed,
+            &network.signer_key_id,
+            signer,
+            Utc::now().timestamp() as u64,
+        )?;
+        let mut authorization = serde_json::to_value(&signed).map_err(|_| ApiError::internal())?;
+        authorization["asset"] = row.try_get("asset")?;
+        let order_id: String = existing.try_get("order_id")?;
+        sqlx::query("UPDATE orders SET \"authorization\" = ?, updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?")
+            .bind(&authorization).bind(&order_id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        return Ok(LinkClaimDto {
+            order_id,
+            merchant_id: existing.try_get("merchant_id")?,
+            payer_account_id: payer.to_string(),
+            authorization,
+        });
+    }
     if max_redemptions.is_some_and(|max| claims_used >= max) {
         return Err(ApiError::conflict(
             "Payment link has reached its redemption limit.",
         ));
     }
 
-    let network = state.config.network(network_id);
     let contract_id = network
         .router_id
         .as_deref()
@@ -169,6 +201,29 @@ pub async fn claim_link(
     })
 }
 
+fn renew_authorization(
+    signed: &mut SignedAuthorization,
+    key_id: &str,
+    signer: &ed25519_dalek::SigningKey,
+    now: u64,
+) -> Result<(), ApiError> {
+    signed.payload.signer_key_id = key_id.to_owned();
+    if signed.payload.expires_at_seconds > 0 && signed.payload.expires_at_seconds <= now + 60 {
+        signed.payload.expires_at_seconds = now + 15 * 60;
+    }
+    signed.signature = STANDARD.encode(
+        signer
+            .sign(
+                &signed
+                    .payload
+                    .signing_digest()
+                    .map_err(|_| ApiError::internal())?,
+            )
+            .to_bytes(),
+    );
+    Ok(())
+}
+
 pub async fn get_order_status(
     state: &AppState,
     merchant_id: &str,
@@ -251,10 +306,12 @@ pub async fn update_order_meta(
     }
     let mut tx = state.pool.begin().await?;
     sqlx::query(
-        "UPDATE orders SET transaction_hash = COALESCE(?, transaction_hash), \
+        "UPDATE orders SET failure_reason = CASE WHEN ? IS NOT NULL AND ? <> COALESCE(transaction_hash, '') THEN NULL ELSE failure_reason END, transaction_hash = COALESCE(?, transaction_hash), \
          customer_name = COALESCE(?, customer_name), updated_at = UTC_TIMESTAMP(6) \
          WHERE merchant_id = ? AND order_id = ? AND network_id = ?",
     )
+    .bind(tx_hash)
+    .bind(tx_hash)
     .bind(tx_hash)
     .bind(
         input
@@ -377,6 +434,14 @@ pub async fn reconcile_order(state: &AppState, row: &PgRow) -> Result<(), ApiErr
     )
     .await?;
     let Some(router_state) = router_view.get("state").and_then(Value::as_str) else {
+        // A finalized failed submission with no router order never began payouts.
+        // Keep ambiguous submissions locked; only this verified case can be retried.
+        if failed_before_processing(&status, &router_view) {
+            sqlx::query("UPDATE orders SET failure_reason = ?, updated_at = UTC_TIMESTAMP(6) WHERE network_id = ? AND contract_id = ? AND order_id = ? AND transaction_hash = ? AND state = 'OPEN' AND settlement_receipt_id IS NULL")
+                .bind("The wallet transaction failed before payment processing began. Your payment was not completed; you may retry this order.")
+                .bind(network_id.as_str()).bind(&contract_id).bind(&order_id).bind(&transaction_hash)
+                .execute(&state.pool).await?;
+        }
         return Ok(());
     };
     let db_state = match router_state {
@@ -586,7 +651,87 @@ async fn validate_submission(
             "Transaction receiver does not match the authorized payment asset.",
         ));
     }
+    let signed: SignedAuthorization = serde_json::from_value(order.try_get("authorization")?)
+        .map_err(|_| ApiError::internal())?;
+    if !submission_matches(transaction, &signed) {
+        return Err(ApiError::bad_request(
+            "Transaction actions do not match this signed order.",
+        ));
+    }
     Ok(())
+}
+
+fn failed_before_processing(status: &Value, router_view: &Value) -> bool {
+    router_view.is_null()
+        && status.get("final_execution_status").and_then(Value::as_str) == Some("FINAL")
+        && status
+            .get("status")
+            .and_then(|s| s.get("Failure"))
+            .is_some()
+}
+
+fn submission_matches(transaction: &Value, signed: &SignedAuthorization) -> bool {
+    let Some(actions) = transaction.get("actions").and_then(Value::as_array) else {
+        return false;
+    };
+    if actions.len() != 1 {
+        return false;
+    }
+    let Some(call) = actions[0].get("FunctionCall") else {
+        return false;
+    };
+    let Some(args) = call
+        .get("args")
+        .and_then(Value::as_str)
+        .and_then(|s| STANDARD.decode(s).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+    else {
+        return false;
+    };
+    let native = matches!(signed.payload.asset, worldz_near_protocol::Asset::Native);
+    let (authorization, signature) = if native {
+        if call.get("method_name").and_then(Value::as_str) != Some("pay_native")
+            || call.get("deposit").and_then(parse_u128) != Some(signed.payload.amount)
+        {
+            return false;
+        }
+        (
+            args.get("authorization").cloned(),
+            args.get("signature")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        )
+    } else {
+        if call.get("method_name").and_then(Value::as_str) != Some("ft_transfer_call")
+            || call.get("deposit").and_then(parse_u128) != Some(1)
+            || args.get("receiver_id").and_then(Value::as_str)
+                != Some(signed.payload.contract_id.as_str())
+            || args.get("amount").and_then(parse_u128) != Some(signed.payload.amount)
+        {
+            return false;
+        }
+        let Some(msg) = args
+            .get("msg")
+            .and_then(Value::as_str)
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        else {
+            return false;
+        };
+        if msg.get("action").and_then(Value::as_str) != Some("pay") {
+            return false;
+        }
+        (
+            msg.get("authorization").cloned(),
+            msg.get("signature")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        )
+    };
+    authorization
+        .and_then(|v| serde_json::from_value::<AuthorizationPayload>(v).ok())
+        .as_ref()
+        == Some(&signed.payload)
+        && signature.as_deref() == Some(signed.signature.as_str())
 }
 
 fn receipt_succeeded(outcome: &Value) -> bool {
@@ -667,8 +812,90 @@ fn parse_network(value: &str) -> Result<NetworkId, ApiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::leg_succeeded;
+    use super::{failed_before_processing, leg_succeeded, renew_authorization, submission_matches};
+    use base64::{engine::general_purpose::STANDARD, Engine};
     use serde_json::json;
+    use worldz_near_protocol::SignedAuthorization;
+
+    #[test]
+    fn renewing_an_expired_claim_keeps_the_same_replay_key() {
+        let vector: serde_json::Value =
+            serde_json::from_str(include_str!("../../docs/vectors/near-auth-v1.json")).unwrap();
+        let mut signed = SignedAuthorization {
+            payload: serde_json::from_value(vector["payload"].clone()).unwrap(),
+            signature: vector["signatureBase64"].as_str().unwrap().into(),
+        };
+        let replay_key = signed.payload.replay_key().unwrap();
+        let order_id = signed.payload.order_id.clone();
+        let signer = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        renew_authorization(&mut signed, "rotated-key", &signer, 1_800_000_001).unwrap();
+        assert_eq!(signed.payload.expires_at_seconds, 1_800_000_901);
+        assert_eq!(signed.payload.replay_key().unwrap(), replay_key);
+        assert_eq!(signed.payload.order_id, order_id);
+        let signature =
+            ed25519_dalek::Signature::from_slice(&STANDARD.decode(&signed.signature).unwrap())
+                .unwrap();
+        assert!(signer
+            .verifying_key()
+            .verify_strict(&signed.payload.signing_digest().unwrap(), &signature)
+            .is_ok());
+    }
+
+    #[test]
+    fn only_final_failed_submissions_without_a_router_order_are_retryable() {
+        let failed = json!({"final_execution_status":"FINAL", "status":{"Failure":{}}});
+        assert!(failed_before_processing(&failed, &json!(null)));
+        assert!(!failed_before_processing(
+            &failed,
+            &json!({"state":"PROCESSING"})
+        ));
+        assert!(!failed_before_processing(
+            &failed,
+            &json!({"state":"PARTIAL_PAYOUT"})
+        ));
+        assert!(!failed_before_processing(
+            &json!({"final_execution_status":"EXECUTED", "status":{"Failure":{}}}),
+            &json!(null)
+        ));
+        assert!(!failed_before_processing(
+            &json!({"final_execution_status":"FINAL", "status":{"SuccessValue":""}}),
+            &json!(null)
+        ));
+    }
+
+    #[test]
+    fn submission_binds_the_exact_order_signature_amount_and_method() {
+        let vector: serde_json::Value =
+            serde_json::from_str(include_str!("../../docs/vectors/near-auth-v1.json")).unwrap();
+        let signed = SignedAuthorization {
+            payload: serde_json::from_value(vector["payload"].clone()).unwrap(),
+            signature: vector["signatureBase64"].as_str().unwrap().into(),
+        };
+        let args = json!({"authorization":signed.payload,"signature":signed.signature});
+        let tx = json!({"actions":[{"FunctionCall":{"method_name":"pay_native", "deposit":signed.payload.amount.to_string(),"args":STANDARD.encode(serde_json::to_vec(&args).unwrap())}}]});
+        assert!(submission_matches(&tx, &signed));
+        let mut other = signed.clone();
+        other.payload.order_id = "another-order".into();
+        assert!(!submission_matches(&tx, &other));
+        other = signed.clone();
+        other.signature = "different-signature".into();
+        assert!(!submission_matches(&tx, &other));
+        let mut wrong = tx.clone();
+        wrong["actions"][0]["FunctionCall"]["deposit"] = json!("1");
+        assert!(!submission_matches(&wrong, &signed));
+        wrong = tx.clone();
+        wrong["actions"][0]["FunctionCall"]["method_name"] = json!("cancel_authorization");
+        assert!(!submission_matches(&wrong, &signed));
+
+        let mut token = signed.clone();
+        token.payload.asset = worldz_near_protocol::Asset::Nep141 {
+            contract_id: "token.testnet".into(),
+        };
+        let args = json!({"receiver_id":token.payload.contract_id,"amount":token.payload.amount.to_string(),"msg":json!({"action":"pay","authorization":token.payload,"signature":token.signature}).to_string()});
+        let tx = json!({"actions":[{"FunctionCall":{"method_name":"ft_transfer_call","deposit":"1","args":STANDARD.encode(serde_json::to_vec(&args).unwrap())}}]});
+        assert!(submission_matches(&tx, &token));
+        assert!(!submission_matches(&tx, &signed));
+    }
 
     #[test]
     fn contract_leg_states_are_read_using_snake_case_values() {

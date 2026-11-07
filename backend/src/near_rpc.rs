@@ -4,6 +4,60 @@ use worldz_near_protocol::NetworkId;
 
 use crate::{error::ApiError, state::AppState};
 
+/// The deployed v1 router uses a legacy LookupMap with this Borsh storage key.
+/// Check before creating a claim so a changed server seed cannot cost a payer gas.
+pub async fn verify_order_signer(state: &AppState, network_id: NetworkId) -> Result<(), ApiError> {
+    let network = state.config.network(network_id);
+    let router = network
+        .router_id
+        .as_deref()
+        .ok_or_else(|| ApiError::unavailable("Payment router is not configured."))?;
+    let signer = network
+        .signer
+        .as_ref()
+        .ok_or_else(|| ApiError::unavailable("Order signing is not configured."))?;
+    let mut key = b"signer_keys".to_vec();
+    key.extend(borsh::to_vec(&network.signer_key_id).map_err(|_| ApiError::internal())?);
+    let result = rpc(
+        state,
+        network_id,
+        "query",
+        json!({
+            "request_type": "view_state", "finality": "final", "account_id": router,
+            "prefix_base64": STANDARD.encode(&key),
+        }),
+    )
+    .await?;
+    if !signer_matches(&result, &key, &signer.verifying_key().to_bytes()) {
+        tracing::error!(router, key_id = %network.signer_key_id, "API signer does not match the router's enabled public key");
+        return Err(ApiError::unavailable("The merchant's payment signing configuration needs an update. No payment was submitted. Please try again after the merchant fixes it."));
+    }
+    Ok(())
+}
+
+fn signer_matches(result: &Value, storage_key: &[u8], public_key: &[u8; 32]) -> bool {
+    result
+        .get("values")
+        .and_then(Value::as_array)
+        .is_some_and(|values| {
+            values.iter().any(|entry| {
+                let key = entry
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .and_then(|v| STANDARD.decode(v).ok());
+                let value = entry
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .and_then(|v| STANDARD.decode(v).ok());
+                key.as_deref() == Some(storage_key)
+                    && value.is_some_and(|v| {
+                        borsh::from_slice::<Vec<u8>>(&v)
+                            .is_ok_and(|stored| stored.as_slice() == public_key)
+                    })
+            })
+        })
+}
+
 pub async fn rpc(
     state: &AppState,
     network_id: NetworkId,
@@ -123,10 +177,31 @@ pub async fn transaction_status(
     rpc(
         state,
         network_id,
-        "EXPERIMENTAL_tx_status",
-        json!([transaction_hash, signer_account_id]),
+        "tx",
+        json!({ "tx_hash": transaction_hash, "sender_account_id": signer_account_id, "wait_until": "FINAL" }),
     )
     .await
+}
+
+#[cfg(test)]
+mod signer_tests {
+    use super::*;
+
+    #[test]
+    fn signer_must_be_enabled_under_the_exact_key_and_match_the_api() {
+        let key = b"signer_keys\x03\0\0\0key";
+        let public = [42; 32];
+        let result = json!({"values": [{"key": STANDARD.encode(key), "value": STANDARD.encode(borsh::to_vec(&public.to_vec()).unwrap())}]});
+        assert!(signer_matches(&result, key, &public));
+        assert!(!signer_matches(&result, key, &[43; 32]));
+        assert!(!signer_matches(&result, b"another-key", &public));
+        assert!(!signer_matches(&json!({"values": []}), key, &public));
+        assert!(!signer_matches(
+            &json!({"values": [{"key": STANDARD.encode(key), "value": "invalid"}]}),
+            key,
+            &public
+        ));
+    }
 }
 
 pub async fn finalized_tip(state: &AppState, network_id: NetworkId) -> Result<u64, ApiError> {

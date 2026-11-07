@@ -43,6 +43,7 @@ pub fn routes() -> Router<AppState> {
         .route("/me/apikeys/{key_ref}", delete(revoke_api_key))
         .route("/assets", get(get_assets))
         .route("/network-config", get(get_network_config))
+        .route("/payment-readiness", get(get_payment_readiness))
         .route("/links", get(list_links).post(create_link))
         .route("/links/{slug}", get(get_link).delete(delete_link))
         .route("/links/{slug}/claim", post(claim_link))
@@ -244,6 +245,14 @@ async fn delete_link(
             return Err(ApiError::not_found("Payment link not found."));
         }
     }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_payment_readiness(
+    State(state): State<AppState>,
+    Query(query): Query<NetworkQuery>,
+) -> Result<StatusCode, ApiError> {
+    near_rpc::verify_order_signer(&state, query.network_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

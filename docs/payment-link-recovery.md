@@ -1,0 +1,70 @@
+# Payment link signer mismatch and recovery
+
+The failed testnet payments on 7 November 2026 were signed by the live API using
+`worldz-testnet-1`, but the router had a different public key registered under that
+ID. The failed authorization verifies with the API's public key and fails with
+the router's public key. The router code matches the locally tested WASM byte for
+byte; native and NEP-141 sandbox settlement tests pass with matching signer keys.
+
+The testnet admin approved and applied the signer update in transaction
+[`5XezVfYaRFhgsoP6bQVnufkP7VL7e4koSHjwEaVi9Qbf`](https://testnet.nearblocks.io/txns/5XezVfYaRFhgsoP6bQVnufkP7VL7e4koSHjwEaVi9Qbf).
+It attached zero NEAR and cost 0.0000314019964375 NEAR in gas. The frontend/backend
+checkout changes still require deployment to their respective hosts.
+
+## Repair the live configuration
+
+Run the read-only checker, which fetches current public configuration and prints
+the exact repair command when the keys differ:
+
+```sh
+node backend/scripts/check-payment-router.mjs
+```
+
+The printed command calls `set_signer_key` on `router.newking.testnet`, signed by
+its admin, `newking.testnet`. It attaches zero NEAR; the admin pays transaction
+gas. Review and authorize it using the admin wallet/keychain. The script does
+not send transactions or read private keys. If the configured server seed was
+changed unintentionally, restore the original server seed instead of changing
+the registered public key. Do not generate a new signer seed during redeploys.
+
+Run the checker again and require `signerMatches: true`. Deploy the backend and
+frontend changes together: the updated frontend uses `/payment-readiness`.
+New claims check the finalized router signer before consuming a link claim;
+wallet submissions also check readiness, including retries of existing claims.
+The storage query uses the deployed v1 router's Borsh `signer_keys` LookupMap.
+Update the checker and readiness function if the contract storage layout changes.
+
+## Recover an existing failed checkout
+
+The checkout saves the customer name before a wallet redirect and lets the
+customer save it while checking a payment's status. Wallet callback hashes are
+restored automatically. If the wallet returned an error without a hash, copy the
+transaction hash from wallet history into **Wallet transaction hash** and select
+**Check payment status**. For the latest observed failed payment, the hash is:
+
+```text
+8cHVPKJCAmW96P6Jih7JgZNBb4ktduTqbWfAiFaXNPYZ
+```
+
+The API validates the signer, receiver, signed authorization, signature, method,
+and amount. It permits retry only after a finalized failure with no stored router
+order. Pending or partial payouts remain locked. A failed receipt can consume gas
+even though the attached payment is returned. The observed transaction returned
+the attached 0.2 NEAR to the payer; gas was charged separately.
+
+An authorization expires after 15 minutes. Claiming the link again reuses an
+existing unpaid order for that payer and renews its signature when necessary,
+preserving the nonce and replay key. This does not consume another redemption
+and prevents an older wallet authorization from paying the same order twice.
+
+## Validation
+
+```sh
+cargo test -p worldz-near-api --bin worldz-near-api
+cargo test -p worldz-near-router --lib
+cargo test -p worldz-near-router --test sandbox
+cd frontend
+npx tsc --noEmit
+npm run test:near
+npx eslint 'src/app/pay/[slug]/page.tsx' src/lib/near/payment.ts src/lib/near/api.ts
+```

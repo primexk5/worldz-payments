@@ -91,6 +91,9 @@ export const nearApi = {
       body: body({ payerAccountId, networkId: NEAR_NETWORK_ID }),
     });
   },
+  paymentReadiness() {
+    return request<void>(`/payment-readiness?networkId=${NEAR_NETWORK_ID}`, { cache: "no-store" });
+  },
   order(merchantId: string, orderId: string, transactionHash?: string | null) {
     const query = new URLSearchParams({ networkId: NEAR_NETWORK_ID });
     if (transactionHash) query.set("transactionHash", transactionHash);

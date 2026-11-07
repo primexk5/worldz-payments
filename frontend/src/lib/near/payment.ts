@@ -22,6 +22,7 @@ export interface PendingPayment {
   payerAccountId: string;
   transactionHash: string | null;
   createdAtMs: number;
+  customerName?: string;
 }
 
 export class TokenStorageRequiredError extends Error {
@@ -60,7 +61,7 @@ export function getPendingPaymentForSlug(slug: string): PendingPayment | null {
     if (!key?.startsWith(PENDING_PREFIX)) continue;
     try {
       const pending = JSON.parse(window.sessionStorage.getItem(key) ?? "null") as PendingPayment | null;
-      if (pending?.version === 1 && pending.linkSlug === slug) return pending;
+      if (pending?.version === 1 && pending.linkSlug === slug && pending.networkId === NEAR_NETWORK_ID && pending.contractId === NEAR_CONTRACT_ID) return pending;
     } catch { /* ignore corrupt browser-local progress */ }
   }
   return null;
@@ -158,10 +159,12 @@ export async function submitAuthorizedPayment(input: {
   accountId: string;
   claim: LinkClaim;
   linkSlug?: string;
+  customerName?: string;
   onSubmitted?: (pending: PendingPayment) => void;
 }): Promise<PendingPayment> {
   const { authorization } = input.claim;
   assertAuthorization(authorization, input.accountId);
+  await nearApi.paymentReadiness();
   await preflightFungibleTokenPayment(authorization);
   await preflightPayerFunds(authorization, input.accountId);
   const pending: PendingPayment = {
@@ -174,49 +177,60 @@ export async function submitAuthorizedPayment(input: {
     payerAccountId: input.accountId,
     transactionHash: null,
     createdAtMs: Date.now(),
+    customerName: input.customerName?.trim() || undefined,
   };
   // Save before opening the wallet: connectors may redirect to an external wallet and return to
   // this page after the signer has approved the transaction.
   savePendingPayment(pending);
   input.onSubmitted?.(pending);
 
-  const outcome = authorization.asset.type === "native"
-    ? await input.wallet.signAndSendTransaction({
-        network: NEAR_NETWORK_ID,
-        signerId: input.accountId,
-        receiverId: authorization.contractId,
-        actions: [{
-          type: "FunctionCall",
-          params: {
-            methodName: "pay_native",
-            args: { authorization, signature: authorization.signature },
-            gas: TX_GAS,
-            deposit: authorization.amount,
-          },
-        }],
-      })
-    : await input.wallet.signAndSendTransaction({
-        network: NEAR_NETWORK_ID,
-        signerId: input.accountId,
-        receiverId: authorization.asset.contractId,
-        actions: [{
-          type: "FunctionCall",
-          params: {
-            methodName: "ft_transfer_call",
-            args: {
-              receiver_id: authorization.contractId,
-              amount: authorization.amount,
-              msg: JSON.stringify({ action: "pay", authorization, signature: authorization.signature }),
+  let outcome;
+  try {
+    outcome = authorization.asset.type === "native"
+      ? await input.wallet.signAndSendTransaction({
+          network: NEAR_NETWORK_ID,
+          signerId: input.accountId,
+          receiverId: authorization.contractId,
+          actions: [{
+            type: "FunctionCall",
+            params: {
+              methodName: "pay_native",
+              args: { authorization, signature: authorization.signature },
+              gas: TX_GAS,
+              deposit: authorization.amount,
             },
-            gas: TX_GAS,
-            deposit: YOCTO_DEPOSIT,
-          },
-        }],
-      });
-
-  if (outcome.status && "Failure" in outcome.status) {
-    throw new Error("The NEAR transaction failed. Check the wallet and retry after verifying its status.");
+          }],
+        })
+      : await input.wallet.signAndSendTransaction({
+          network: NEAR_NETWORK_ID,
+          signerId: input.accountId,
+          receiverId: authorization.asset.contractId,
+          actions: [{
+            type: "FunctionCall",
+            params: {
+              methodName: "ft_transfer_call",
+              args: {
+                receiver_id: authorization.contractId,
+                amount: authorization.amount,
+                msg: JSON.stringify({ action: "pay", authorization, signature: authorization.signature }),
+              },
+              gas: TX_GAS,
+              deposit: YOCTO_DEPOSIT,
+            },
+          }],
+        });
+  } catch (cause) {
+    // These are definite wallet rejections. Unknown transport or execution
+    // failures retain progress because the transaction may still have been sent.
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    if (/user (rejected|cancelled|canceled)|request rejected|action_rejected/i.test(reason)) {
+      clearPendingPayment(pending);
+    }
+    throw cause;
   }
+
+  // Even a failed final outcome can contain successful router receipts. Keep its
+  // hash and let the backend verify whether this order began processing.
   const submitted = { ...pending, transactionHash: outcome.transaction.hash };
   savePendingPayment(submitted);
   input.onSubmitted?.(submitted);
@@ -238,7 +252,7 @@ export async function waitForVerifiedSettlement(
   while (Date.now() < deadline) {
     const status = await nearApi.order(merchantId, orderId, transactionHash);
     onStatus?.(status);
-    if (isVerifiedSettlement(status) || status.state === "REFUNDED" || status.state === "RECONCILIATION_REQUIRED") {
+    if (isVerifiedSettlement(status) || status.state === "REFUNDED" || status.state === "RECONCILIATION_REQUIRED" || (status.state === "OPEN" && status.failureReason)) {
       return status;
     }
     await new Promise((resolve) => setTimeout(resolve, 2500));
