@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -37,7 +38,7 @@ pub async fn claim_link(
     let row = sqlx::query(
         "SELECT l.*, m.account_id AS merchant_account_id, m.payout_account_id AS payout_account_id \
          FROM payment_links l JOIN merchants m USING (merchant_id) \
-         WHERE l.slug = ? AND l.active FOR UPDATE",
+         WHERE l.slug = ? AND l.active FOR UPDATE OF l",
     )
     .bind(slug)
     .fetch_optional(&mut *tx)
@@ -55,12 +56,52 @@ pub async fn claim_link(
             return Err(ApiError::conflict("Payment link has expired."));
         }
     }
-    let claims_used: i32 = row.try_get("claims_used")?;
+    if let Some(buyer) = sqlx::query("SELECT requires_shipping,buyer_data_ciphertext,buyer_data_nonce,quantity,quantity_priced FROM shopify_checkout_sessions WHERE slug=? FOR UPDATE")
+        .bind(slug).fetch_optional(&mut *tx).await? {
+        crate::shopify::validate_claim_buyer(state, &buyer)?;
+    }
+    // Only release expired reservations after finalized chain state proves the
+    // authorization cannot execute and no router order has started.
     let max_redemptions: Option<i32> = row.try_get("max_redemptions")?;
+    if max_redemptions.is_some_and(|limit| row.get::<i32, _>("claims_used") >= limit) {
+        return Err(ApiError::conflict(
+            "This payment link has already reached its verified payment limit.",
+        ));
+    }
+    {
+        let expired = sqlx::query("SELECT order_id,order_key,contract_id,\"authorization\" FROM orders WHERE link_slug=? AND state='OPEN' AND reserved_until < UTC_TIMESTAMP(6) AND (CAST(? AS BOOLEAN) OR payer_account_id=?) FOR UPDATE")
+            .bind(slug).bind(max_redemptions.is_some()).bind(payer.as_str()).fetch_all(&mut *tx).await?;
+        if !expired.is_empty() {
+            let chain_time = near_rpc::finalized_timestamp_seconds(state, network_id).await?;
+            for reservation in expired {
+                let authorization: AuthorizationPayload =
+                    serde_json::from_value(reservation.try_get("authorization")?)
+                        .map_err(|_| ApiError::internal())?;
+                if authorization.expires_at_seconds == 0
+                    || chain_time < authorization.expires_at_seconds
+                {
+                    continue;
+                }
+                let view = near_rpc::view_function(
+                    state,
+                    network_id,
+                    &reservation.try_get::<String, _>("contract_id")?,
+                    "get_order",
+                    json!({"order_key":reservation.try_get::<String,_>("order_key")?}),
+                )
+                .await?;
+                if view.is_null() {
+                    sqlx::query("UPDATE orders SET state='EXPIRED',updated_at=UTC_TIMESTAMP(6) WHERE order_id=? AND state='OPEN'")
+                        .bind(reservation.try_get::<String,_>("order_id")?).execute(&mut *tx).await?;
+                }
+            }
+        }
+    }
+    let edit_token = new_edit_token();
+    let edit_hash = Sha256::digest(edit_token.as_bytes());
     let network = state.config.network(network_id);
-    // Reuse the unpaid order's nonce/replay key. This permits a failed or expired
-    // authorization to be renewed without consuming a second link redemption,
-    // while an older wallet submission still cannot pay the order twice.
+    // Reuse an active order without extending its authorization deadline. Expired
+    // orders are released above only after a finalized no-payment proof.
     let existing = sqlx::query("SELECT order_id, merchant_id, payer_account_id, \"authorization\" FROM orders WHERE link_slug = ? AND network_id = ? AND payer_account_id = ? AND contract_id = ? AND state = 'OPEN' ORDER BY created_at DESC LIMIT 1 FOR UPDATE")
         .bind(slug).bind(network_id.as_str()).bind(payer.as_str())
         .bind(network.router_id.as_deref().unwrap_or_default())
@@ -70,28 +111,26 @@ pub async fn claim_link(
             serde_json::from_value(existing.try_get("authorization")?)
                 .map_err(|_| ApiError::internal())?;
         let signer = network.signer.as_ref().ok_or_else(ApiError::internal)?;
-        renew_authorization(
-            &mut signed,
-            &network.signer_key_id,
-            signer,
-            Utc::now().timestamp() as u64,
-        )?;
+        resign_authorization(&mut signed, &network.signer_key_id, signer)?;
         let mut authorization = serde_json::to_value(&signed).map_err(|_| ApiError::internal())?;
         authorization["asset"] = row.try_get("asset")?;
         let order_id: String = existing.try_get("order_id")?;
-        sqlx::query("UPDATE orders SET \"authorization\" = ?, customer_name = COALESCE(?, customer_name), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?")
-            .bind(&authorization).bind(customer_name).bind(&order_id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE orders SET \"authorization\" = ?, customer_name = COALESCE(?, customer_name), edit_token_hash=?, reserved_until=to_timestamp(?), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?")
+            .bind(&authorization).bind(customer_name).bind(&edit_hash[..]).bind(signed.payload.expires_at_seconds as f64).bind(&order_id).execute(&mut *tx).await?;
         tx.commit().await?;
         return Ok(LinkClaimDto {
+            edit_token,
             order_id,
             merchant_id: existing.try_get("merchant_id")?,
             payer_account_id: payer.to_string(),
             authorization,
         });
     }
-    if max_redemptions.is_some_and(|max| claims_used >= max) {
+    let occupied = sqlx::query("SELECT count(*) AS count FROM orders WHERE link_slug=? AND state NOT IN ('EXPIRED','CANCELLED','REFUNDED')")
+        .bind(slug).fetch_one(&mut *tx).await?.try_get::<i64,_>("count")?;
+    if max_redemptions.is_some_and(|max| occupied >= i64::from(max)) {
         return Err(ApiError::conflict(
-            "Payment link has reached its redemption limit.",
+            "Payment link is fully paid or reserved. Wait for pending checkouts to finish or expire.",
         ));
     }
 
@@ -163,8 +202,8 @@ pub async fn claim_link(
     let source_asset = serde_json::to_value(&asset).map_err(|_| ApiError::internal())?;
 
     sqlx::query(
-        "INSERT INTO orders (order_id, merchant_id, payer_account_id, network_id, contract_id, order_key, \"authorization\", asset, amount, fee, net, source, link_slug, customer_name) \
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,'link',?,?)",
+        "INSERT INTO orders (order_id, merchant_id, payer_account_id, network_id, contract_id, order_key, \"authorization\", asset, amount, fee, net, source, link_slug, customer_name, edit_token_hash, reserved_until) \
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,'link',?,?,?,to_timestamp(?))",
     )
     .bind(&order_id)
     .bind(&merchant_id)
@@ -179,29 +218,36 @@ pub async fn claim_link(
     .bind(net.to_string())
     .bind(slug)
     .bind(customer_name)
+    .bind(&edit_hash[..])
+    .bind(payload.expires_at_seconds as f64)
     .execute(&mut *tx)
     .await?;
 
-    let update = sqlx::query(
-        "UPDATE payment_links SET claims_used = claims_used + 1 \
-         WHERE slug = ? AND active AND (max_redemptions IS NULL OR claims_used < max_redemptions)",
-    )
-    .bind(slug)
-    .execute(&mut *tx)
-    .await?;
-    if update.rows_affected() != 1 {
-        return Err(ApiError::conflict(
-            "Payment link has reached its redemption limit.",
-        ));
-    }
     tx.commit().await?;
 
     Ok(LinkClaimDto {
+        edit_token,
         order_id,
         merchant_id,
         payer_account_id: payer.to_string(),
         authorization,
     })
+}
+
+fn new_edit_token() -> String {
+    let mut secret = [0u8; 32];
+    OsRng.fill_bytes(&mut secret);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret)
+}
+
+fn can_edit_name(stored: Option<&[u8]>, token: Option<&str>, state: &str, settled: bool) -> bool {
+    if settled || !matches!(state, "OPEN" | "PROCESSING") {
+        return false;
+    }
+    let Some(token) = token.filter(|t| t.len() == 43) else {
+        return false;
+    };
+    stored.is_some_and(|stored| stored == &Sha256::digest(token.as_bytes())[..])
 }
 
 fn normalized_customer_name(name: Option<&str>) -> Result<Option<&str>, ApiError> {
@@ -214,16 +260,12 @@ fn normalized_customer_name(name: Option<&str>) -> Result<Option<&str>, ApiError
     Ok(name)
 }
 
-fn renew_authorization(
+fn resign_authorization(
     signed: &mut SignedAuthorization,
     key_id: &str,
     signer: &ed25519_dalek::SigningKey,
-    now: u64,
 ) -> Result<(), ApiError> {
     signed.payload.signer_key_id = key_id.to_owned();
-    if signed.payload.expires_at_seconds > 0 && signed.payload.expires_at_seconds <= now + 60 {
-        signed.payload.expires_at_seconds = now + 15 * 60;
-    }
     signed.signature = STANDARD.encode(
         signer
             .sign(
@@ -290,6 +332,18 @@ pub async fn update_order_meta(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("Order not found."))?;
+    let token_hash: Option<Vec<u8>> = row.try_get("edit_token_hash")?;
+    if customer_name.is_some() {
+        if !can_edit_name(
+            token_hash.as_deref(),
+            input.edit_token.as_deref(),
+            &row.try_get::<String, _>("state")?,
+            row.try_get::<Option<String>, _>("settlement_receipt_id")?
+                .is_some(),
+        ) {
+            return Err(ApiError::forbidden("Receipt-name edits require this checkout's private edit token and an unsettled order."));
+        }
+    }
     if let Some(slug) = input.slug.as_deref() {
         if row.try_get::<Option<String>, _>("link_slug")?.as_deref() != Some(slug) {
             return Err(ApiError::bad_request(
@@ -310,10 +364,10 @@ pub async fn update_order_meta(
         validate_submission(state, &row, hash, input.network_id).await?;
     }
     let mut tx = state.pool.begin().await?;
-    sqlx::query(
+    let updated = sqlx::query(
         "UPDATE orders SET failure_reason = CASE WHEN ? IS NOT NULL AND ? <> COALESCE(transaction_hash, '') THEN NULL ELSE failure_reason END, transaction_hash = COALESCE(?, transaction_hash), \
-         customer_name = COALESCE(?, customer_name), updated_at = UTC_TIMESTAMP(6) \
-         WHERE merchant_id = ? AND order_id = ? AND network_id = ?",
+         customer_name = CASE WHEN settlement_receipt_id IS NULL AND state IN ('OPEN','PROCESSING') THEN COALESCE(?, customer_name) ELSE customer_name END, updated_at = UTC_TIMESTAMP(6) \
+         WHERE merchant_id = ? AND order_id = ? AND network_id = ? AND (CAST(? AS BYTEA) IS NULL OR (edit_token_hash=? AND settlement_receipt_id IS NULL AND state IN ('OPEN','PROCESSING')))",
     )
     .bind(tx_hash)
     .bind(tx_hash)
@@ -322,8 +376,15 @@ pub async fn update_order_meta(
     .bind(merchant_id)
     .bind(order_id)
     .bind(input.network_id.as_str())
+    .bind(if customer_name.is_some() { token_hash.as_deref() } else { None })
+    .bind(if customer_name.is_some() { token_hash.as_deref() } else { None })
     .execute(&mut *tx)
     .await?;
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::forbidden(
+            "The receipt is finalized or the edit token has changed.",
+        ));
+    }
     if let Some(hash) = tx_hash {
         sqlx::query("INSERT IGNORE INTO order_submissions (network_id, contract_id, order_id, transaction_hash, signer_account_id) SELECT network_id, contract_id, order_id, ?, payer_account_id FROM orders WHERE merchant_id=? AND order_id=? AND network_id=?")
             .bind(hash)
@@ -356,8 +417,8 @@ pub fn spawn_reconciliation_worker(state: AppState) {
             let rows = match sqlx::query(
                 "SELECT o.*, s.transaction_hash AS reconciliation_tx_hash, s.signer_account_id AS reconciliation_signer_id FROM orders o \
                  JOIN order_submissions s USING (network_id, contract_id, order_id) \
-                 WHERE o.settlement_receipt_id IS NULL AND o.state NOT IN ('REFUNDED','EXPIRED','CANCELLED','RECONCILIATION_REQUIRED') \
-                 ORDER BY s.submitted_at ASC LIMIT 50",
+                 WHERE o.settlement_receipt_id IS NULL AND o.state NOT IN ('REFUNDED','EXPIRED','CANCELLED','RECONCILIATION_REQUIRED') AND NOT s.reconcile_complete AND s.next_reconcile_at <= UTC_TIMESTAMP(6) \
+                 ORDER BY s.next_reconcile_at ASC, s.submitted_at ASC LIMIT 50",
             )
             .fetch_all(&state.pool)
             .await
@@ -369,6 +430,9 @@ pub fn spawn_reconciliation_worker(state: AppState) {
                 }
             };
             for row in rows {
+                // Rotate attempted submissions even when RPC or payouts keep failing.
+                let _ = sqlx::query("UPDATE order_submissions SET next_reconcile_at=UTC_TIMESTAMP(6) + INTERVAL '30 seconds' WHERE network_id=? AND contract_id=? AND order_id=? AND transaction_hash=?")
+                    .bind(row.get::<String,_>("network_id")).bind(row.get::<String,_>("contract_id")).bind(row.get::<String,_>("order_id")).bind(row.get::<String,_>("reconciliation_tx_hash")).execute(&state.pool).await;
                 if let Err(error) = reconcile_order(&state, &row).await {
                     tracing::warn!(error = %error, "order reconciliation deferred");
                 }
@@ -436,6 +500,8 @@ pub async fn reconcile_order(state: &AppState, row: &PgRow) -> Result<(), ApiErr
         // A finalized failed submission with no router order never began payouts.
         // Keep ambiguous submissions locked; only this verified case can be retried.
         if failed_before_processing(&status, &router_view) {
+            sqlx::query("UPDATE order_submissions SET reconcile_complete=TRUE WHERE network_id=? AND contract_id=? AND order_id=? AND transaction_hash=?")
+                .bind(network_id.as_str()).bind(&contract_id).bind(&order_id).bind(&transaction_hash).execute(&state.pool).await?;
             sqlx::query("UPDATE orders SET failure_reason = ?, updated_at = UTC_TIMESTAMP(6) WHERE network_id = ? AND contract_id = ? AND order_id = ? AND transaction_hash = ? AND state = 'OPEN' AND settlement_receipt_id IS NULL")
                 .bind("The wallet transaction failed before payment processing began. Your payment was not completed; you may retry this order.")
                 .bind(network_id.as_str()).bind(&contract_id).bind(&order_id).bind(&transaction_hash)
@@ -574,13 +640,23 @@ pub async fn reconcile_order(state: &AppState, row: &PgRow) -> Result<(), ApiErr
     };
     let payload = serde_json::to_value(dto).map_err(|_| ApiError::internal())?;
     let mut tx = state.pool.begin().await?;
-    sqlx::query("UPDATE orders SET state='SETTLED', settlement_receipt_id=?, failure_reason=NULL, updated_at=UTC_TIMESTAMP(6) WHERE network_id=? AND contract_id=? AND order_id=?")
+    sqlx::query("SELECT slug FROM payment_links WHERE slug=? FOR UPDATE")
+        .bind(row.try_get::<Option<String>, _>("link_slug")?)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let settled = sqlx::query("UPDATE orders SET state='SETTLED', settlement_receipt_id=?, failure_reason=NULL, updated_at=UTC_TIMESTAMP(6) WHERE network_id=? AND contract_id=? AND order_id=? AND settlement_receipt_id IS NULL")
         .bind(&receipt_id)
         .bind(network_id.as_str())
         .bind(&contract_id)
         .bind(&order_id)
         .execute(&mut *tx)
         .await?;
+    if settled.rows_affected() == 1 {
+        sqlx::query("UPDATE payment_links SET claims_used=claims_used+1 WHERE slug=?")
+            .bind(row.try_get::<Option<String>, _>("link_slug")?)
+            .execute(&mut *tx)
+            .await?;
+    }
     sqlx::query(
         "UPDATE orders SET transaction_hash=? WHERE network_id=? AND contract_id=? AND order_id=?",
     )
@@ -811,8 +887,47 @@ fn parse_network(value: &str) -> Result<NetworkId, ApiError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn receipt_edits_require_a_private_token_and_an_unsettled_order() {
+        use sha2::{Digest, Sha256};
+        let token = super::new_edit_token();
+        let hash = Sha256::digest(token.as_bytes());
+        assert!(super::can_edit_name(
+            Some(&hash),
+            Some(&token),
+            "OPEN",
+            false
+        ));
+        assert!(super::can_edit_name(
+            Some(&hash),
+            Some(&token),
+            "PROCESSING",
+            false
+        ));
+        assert!(!super::can_edit_name(Some(&hash), None, "OPEN", false));
+        assert!(!super::can_edit_name(
+            Some(&hash),
+            Some(&super::new_edit_token()),
+            "OPEN",
+            false
+        ));
+        assert!(!super::can_edit_name(None, Some(&token), "OPEN", false));
+        assert!(!super::can_edit_name(
+            Some(&hash),
+            Some(&token),
+            "SETTLED",
+            true
+        ));
+        assert!(!super::can_edit_name(
+            Some(&hash),
+            Some(&token),
+            "OPEN",
+            true
+        ));
+    }
+
     use super::{
-        failed_before_processing, leg_succeeded, normalized_customer_name, renew_authorization,
+        failed_before_processing, leg_succeeded, normalized_customer_name, resign_authorization,
         submission_matches,
     };
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -849,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    fn renewing_an_expired_claim_keeps_the_same_replay_key() {
+    fn resigning_a_claim_preserves_its_replay_key_and_expiration() {
         let vector: serde_json::Value =
             serde_json::from_str(include_str!("../../docs/vectors/near-auth-v1.json")).unwrap();
         let mut signed = SignedAuthorization {
@@ -859,8 +974,8 @@ mod tests {
         let replay_key = signed.payload.replay_key().unwrap();
         let order_id = signed.payload.order_id.clone();
         let signer = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
-        renew_authorization(&mut signed, "rotated-key", &signer, 1_800_000_001).unwrap();
-        assert_eq!(signed.payload.expires_at_seconds, 1_800_000_901);
+        resign_authorization(&mut signed, "rotated-key", &signer).unwrap();
+        assert_eq!(signed.payload.expires_at_seconds, 1_800_000_000);
         assert_eq!(signed.payload.replay_key().unwrap(), replay_key);
         assert_eq!(signed.payload.order_id, order_id);
         let signature =

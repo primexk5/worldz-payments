@@ -265,6 +265,20 @@ async fn claim_link(
         .payer_account_id
         .parse::<near_account_id::AccountId>()
         .map_err(|_| ApiError::bad_request("Invalid payer account ID."))?;
+    let proof = input.proof.as_ref().ok_or_else(ApiError::unauthorized)?;
+    auth::consume_proof(
+        &state,
+        input.network_id,
+        &payer,
+        &proof.state,
+        crate::models::ChallengePurpose::Checkout,
+        &proof.message,
+        auth::decode_nonce(&proof.nonce)?,
+        &proof.public_key,
+        &proof.signature,
+        Some(json!({"checkoutSlug":slug})),
+    )
+    .await?;
     let claim = orders::claim_link(
         &state,
         &slug,
@@ -288,6 +302,7 @@ async fn get_order(
             &order_id,
             PaymentMetaRequest {
                 network_id: query.network_id,
+                edit_token: None,
                 customer_name: None,
                 slug: None,
                 transaction_hash: Some(transaction_hash.to_owned()),

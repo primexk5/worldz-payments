@@ -43,9 +43,13 @@ pub async fn issue_challenge(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(input): Json<ChallengeRequest>,
-) -> Result<Json<ChallengeResponse>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     let account_id = validate_account(&input.account_id)?;
-    enforce_rate_limit(&state, &format!("challenge:{}", account_id), 30).await?;
+    if input.purpose != ChallengePurpose::Checkout {
+        require_auth_network(input.network_id, state.config.auth_network_id)?;
+    }
+    let caller = auth_client_token(&headers);
+    enforce_rate_limit(&state, &caller_subject(&caller, "challenge"), 120).await?;
     if matches!(input.purpose, ChallengePurpose::PayoutUpdate) {
         let merchant = current_merchant(&state, &headers).await?;
         if merchant.account_id != account_id.as_str() {
@@ -75,7 +79,7 @@ pub async fn issue_challenge(
     let mut nonce = [0u8; 32];
     OsRng.fill_bytes(&mut nonce);
     let expires = Utc::now() + Duration::seconds(state.config.auth_challenge_ttl_seconds);
-    let message = challenge_message(
+    let mut message = challenge_message(
         input.purpose,
         account_id.as_str(),
         input.network_id,
@@ -84,7 +88,20 @@ pub async fn issue_challenge(
         input.display_name.as_deref(),
         input.webhook_url.as_deref(),
     );
+    if input.purpose == ChallengePurpose::Checkout {
+        let slug = input.checkout_slug.as_deref().unwrap_or_default();
+        if slug.is_empty()
+            || slug.len() > 32
+            || !slug
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err(ApiError::bad_request("A valid checkout slug is required."));
+        }
+        message.push_str(&format!("\nCheckout: {slug}"));
+    }
     let intent = json!({
+        "checkoutSlug": input.checkout_slug,
         "payoutAccountId": input.payout_account_id,
         "displayName": input.display_name,
         "webhookUrl": input.webhook_url,
@@ -106,22 +123,45 @@ pub async fn issue_challenge(
     .execute(&state.pool)
     .await?;
 
-    Ok(Json(ChallengeResponse {
-        message,
-        nonce: STANDARD.encode(nonce),
-        recipient: state.config.auth_recipient.clone(),
-        state: input.state,
-        network_id: input.network_id,
-        expires_at_seconds: expires.timestamp(),
-        purpose: input.purpose,
-    }))
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&format!(
+            "worldz_auth_client={caller}; Path=/; HttpOnly; SameSite=Lax; Max-Age=900{}",
+            if state.config.session_cookie_secure {
+                "; Secure"
+            } else {
+                ""
+            }
+        ))
+        .map_err(|_| ApiError::internal())?,
+    );
+    Ok((
+        response_headers,
+        Json(ChallengeResponse {
+            message,
+            nonce: STANDARD.encode(nonce),
+            recipient: state.config.auth_recipient.clone(),
+            state: input.state,
+            network_id: input.network_id,
+            expires_at_seconds: expires.timestamp(),
+            purpose: input.purpose,
+        }),
+    ))
 }
 
 pub async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let account_id = validate_account(&input.account_id)?;
+    enforce_rate_limit(
+        &state,
+        &caller_subject(&auth_client_token(&headers), "login"),
+        120,
+    )
+    .await?;
     let nonce = decode_nonce(&input.nonce)?;
     consume_proof(
         &state,
@@ -137,8 +177,9 @@ pub async fn login(
     )
     .await?;
 
-    let row = sqlx::query("SELECT * FROM merchants WHERE account_id = ?")
+    let row = sqlx::query("SELECT * FROM merchants WHERE account_id = ? AND auth_network_id = ?")
         .bind(account_id.as_str())
+        .bind(state.config.auth_network_id.as_str())
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| ApiError::not_found("Merchant account is not onboarded."))?;
@@ -160,8 +201,15 @@ pub async fn login(
 
 pub async fn onboard(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<OnboardingRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    enforce_rate_limit(
+        &state,
+        &caller_subject(&auth_client_token(&headers), "onboard"),
+        120,
+    )
+    .await?;
     let account_id = validate_account(&input.account_id)?;
     let payout_id = validate_account(&input.payout_account_id)?;
     validate_display_name(&input.display_name)?;
@@ -190,18 +238,20 @@ pub async fn onboard(
 
     let merchant_id = format!("mch_{}", Uuid::new_v4().simple());
     sqlx::query(
-        "INSERT IGNORE INTO merchants (merchant_id, account_id, payout_account_id, display_name, webhook_url) \
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT IGNORE INTO merchants (merchant_id, account_id, payout_account_id, display_name, webhook_url, auth_network_id) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&merchant_id)
     .bind(account_id.as_str())
     .bind(payout_id.as_str())
     .bind(input.display_name.trim())
     .bind(input.webhook_url.as_deref())
+    .bind(state.config.auth_network_id.as_str())
     .execute(&state.pool)
     .await?;
-    let row = sqlx::query("SELECT * FROM merchants WHERE account_id = ?")
+    let row = sqlx::query("SELECT * FROM merchants WHERE account_id = ? AND auth_network_id = ?")
         .bind(account_id.as_str())
+        .bind(state.config.auth_network_id.as_str())
         .fetch_one(&state.pool)
         .await?;
     let merchant = merchant_from_row(&row);
@@ -319,8 +369,9 @@ pub async fn update_payout(
         .bind(&merchant.merchant_id)
         .execute(&state.pool)
         .await?;
-    let row = sqlx::query("SELECT * FROM merchants WHERE account_id = ?")
+    let row = sqlx::query("SELECT * FROM merchants WHERE account_id = ? AND auth_network_id = ?")
         .bind(account_id.as_str())
+        .bind(state.config.auth_network_id.as_str())
         .fetch_one(&state.pool)
         .await?;
     Ok(merchant_from_row(&row))
@@ -334,9 +385,10 @@ pub async fn current_merchant(
         .ok_or_else(ApiError::unauthorized)?;
     let row = sqlx::query(
         "SELECT m.* FROM merchant_sessions s JOIN merchants m USING (merchant_id) \
-         WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(6)",
+         WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(6) AND m.auth_network_id = ?",
     )
     .bind(hash_token(token).as_slice())
+    .bind(state.config.auth_network_id.as_str())
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(ApiError::unauthorized)?;
@@ -355,15 +407,16 @@ pub async fn consume_proof(
     signature_b64: &str,
     expected_intent: Option<Value>,
 ) -> Result<(), ApiError> {
-    enforce_rate_limit(state, &format!("verify:{}", account_id), 20).await?;
-    let mut tx = state.pool.begin().await?;
+    if purpose != ChallengePurpose::Checkout {
+        require_auth_network(network_id, state.config.auth_network_id)?;
+    }
     let row = sqlx::query(
         "SELECT message, nonce, purpose, network_id, intent FROM auth_challenges \
-         WHERE account_id = ? AND state = ? AND expires_at > UTC_TIMESTAMP(6) AND consumed_at IS NULL FOR UPDATE",
+         WHERE account_id = ? AND state = ? AND expires_at > UTC_TIMESTAMP(6) AND consumed_at IS NULL",
     )
     .bind(account_id.as_str())
     .bind(challenge_state)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::unauthorized())?;
     let expected_message: String = row.try_get("message")?;
@@ -378,6 +431,13 @@ pub async fn consume_proof(
         return Err(ApiError::unauthorized());
     }
     let intent: Value = row.try_get("intent")?;
+    enforce_rate_limit(
+        state,
+        &format!("verify:{}", hex::encode(Sha256::digest(nonce))),
+        20,
+    )
+    .await?;
+
     verify_nep413(
         state,
         network_id,
@@ -395,12 +455,12 @@ pub async fn consume_proof(
     {
         return Err(ApiError::unauthorized());
     }
-    sqlx::query("UPDATE auth_challenges SET consumed_at = UTC_TIMESTAMP(6) WHERE account_id = ? AND state = ? AND consumed_at IS NULL")
-        .bind(account_id.as_str())
-        .bind(challenge_state)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
+    let consumed = sqlx::query("UPDATE auth_challenges SET consumed_at = UTC_TIMESTAMP(6) WHERE account_id=? AND state=? AND nonce=? AND message=? AND network_id=? AND purpose=? AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6)")
+        .bind(account_id.as_str()).bind(challenge_state).bind(nonce.as_slice()).bind(message)
+        .bind(network_id.as_str()).bind(purpose.as_str()).execute(&state.pool).await?;
+    if consumed.rows_affected() != 1 {
+        return Err(ApiError::unauthorized());
+    }
     Ok(())
 }
 
@@ -409,6 +469,7 @@ async fn enforce_rate_limit(
     subject: &str,
     max_attempts: i32,
 ) -> Result<(), ApiError> {
+    sqlx::query("DELETE FROM auth_rate_limits WHERE window_started_at < UTC_TIMESTAMP(6) - INTERVAL '1 day'").execute(&state.pool).await?;
     sqlx::query(
         "INSERT INTO auth_rate_limits (subject, window_started_at, attempts) VALUES (?, UTC_TIMESTAMP(6), 1) \
          ON CONFLICT (subject) DO UPDATE SET \
@@ -478,6 +539,19 @@ fn verify_challenge_intent(
 ) -> Result<(), ApiError> {
     match purpose {
         ChallengePurpose::Login => Ok(()),
+        ChallengePurpose::Checkout => {
+            let slug = intent
+                .get("checkoutSlug")
+                .and_then(Value::as_str)
+                .ok_or_else(ApiError::unauthorized)?;
+            if !message
+                .lines()
+                .any(|line| line == format!("Checkout: {slug}"))
+            {
+                return Err(ApiError::unauthorized());
+            }
+            Ok(())
+        }
         ChallengePurpose::Onboarding | ChallengePurpose::PayoutUpdate => {
             let payout = intent
                 .get("payoutAccountId")
@@ -512,6 +586,7 @@ fn request_intent_matches(purpose: ChallengePurpose, issued: &Value, requested: 
         ChallengePurpose::Onboarding => &["payoutAccountId", "displayName", "webhookUrl"],
         ChallengePurpose::PayoutUpdate => &["payoutAccountId"],
         ChallengePurpose::Login => &[],
+        ChallengePurpose::Checkout => &["checkoutSlug"],
     };
     keys.iter().all(|key| issued.get(key) == requested.get(key))
 }
@@ -548,7 +623,39 @@ fn challenge_message(
     lines.join("\n")
 }
 
-fn decode_nonce(encoded: &str) -> Result<[u8; 32], ApiError> {
+fn require_auth_network(requested: NetworkId, configured: NetworkId) -> Result<(), ApiError> {
+    if requested != configured {
+        return Err(ApiError::forbidden(
+            "Merchant authentication is not enabled on this network.",
+        ));
+    }
+    Ok(())
+}
+
+fn auth_client_token(headers: &HeaderMap) -> String {
+    if let Some(token) = cookie_value(headers, "worldz_auth_client").filter(|token| {
+        token.len() == 43
+            && token
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    }) {
+        return token.to_owned();
+    }
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn caller_subject(caller: &str, action: &str) -> String {
+    // A private browser capability avoids victim-account quotas and spoofable
+    // forwarding-header identities. Network abuse limits belong at the ingress.
+    format!(
+        "{action}-caller:{}",
+        hex::encode(Sha256::digest(caller.as_bytes()))
+    )
+}
+
+pub fn decode_nonce(encoded: &str) -> Result<[u8; 32], ApiError> {
     STANDARD
         .decode(encoded)
         .map_err(|_| ApiError::bad_request("nonce must be base64"))?
@@ -655,6 +762,58 @@ fn merchant_from_row(row: &PgRow) -> MerchantProfile {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn caller_budgets_do_not_trust_account_names_or_forwarded_addresses() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut victim = HeaderMap::new();
+        victim.insert(
+            "cookie",
+            HeaderValue::from_static(
+                "worldz_auth_client=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+        );
+        let mut attacker = HeaderMap::new();
+        attacker.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("same-victim-ip"),
+        );
+        let victim_id = super::auth_client_token(&victim);
+        let attacker_id = super::auth_client_token(&attacker);
+        assert_ne!(
+            super::caller_subject(&victim_id, "login"),
+            super::caller_subject(&attacker_id, "login")
+        );
+        assert_eq!(super::auth_client_token(&victim), victim_id);
+    }
+    #[test]
+    fn merchant_authentication_cannot_switch_networks() {
+        use worldz_near_protocol::NetworkId::{Mainnet, Testnet};
+        assert!(super::require_auth_network(Testnet, Testnet).is_ok());
+        assert!(super::require_auth_network(Mainnet, Mainnet).is_ok());
+        assert!(super::require_auth_network(Mainnet, Testnet).is_err());
+        assert!(super::require_auth_network(Testnet, Mainnet).is_err());
+    }
+
+    #[test]
+    fn checkout_wallet_proof_is_bound_to_one_link() {
+        let purpose = crate::models::ChallengePurpose::Checkout;
+        let issued = serde_json::json!({"checkoutSlug":"intended-link"});
+        assert!(super::verify_challenge_intent(
+            purpose,
+            &issued,
+            "Purpose: checkout\nCheckout: intended-link"
+        )
+        .is_ok());
+        assert!(
+            super::verify_challenge_intent(purpose, &issued, "Checkout: different-link").is_err()
+        );
+        assert!(!super::request_intent_matches(
+            purpose,
+            &issued,
+            &serde_json::json!({"checkoutSlug":"different-link"})
+        ));
+    }
+
     use ed25519_dalek::{Signer, SigningKey, Verifier};
     use serde_json::json;
 

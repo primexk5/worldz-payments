@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, RawQuery, State},
     http::{HeaderMap, StatusCode},
     response::Redirect,
 };
@@ -96,7 +96,7 @@ pub async fn save_buyer_details(
         .map_err(|_| ApiError::internal())?;
     let mut tx = state.pool.begin().await?;
     let link = sqlx::query(
-        "SELECT claims_used,expires_at,active FROM payment_links WHERE slug=? FOR UPDATE",
+        "SELECT l.claims_used,l.expires_at,l.active,EXISTS(SELECT 1 FROM orders o WHERE o.link_slug=l.slug AND o.state NOT IN ('EXPIRED','CANCELLED','REFUNDED')) AS has_authorization FROM payment_links l WHERE l.slug=? FOR UPDATE",
     )
     .bind(&slug)
     .fetch_optional(&mut *tx)
@@ -106,6 +106,7 @@ pub async fn save_buyer_details(
     let expires_at: Option<chrono::DateTime<Utc>> = link.try_get("expires_at")?;
     if !link.try_get::<bool, _>("active")?
         || claims_used != 0
+        || link.try_get::<bool, _>("has_authorization")?
         || expires_at.is_some_and(|value| value <= Utc::now())
     {
         return Err(ApiError::conflict(
@@ -123,7 +124,7 @@ pub async fn save_buyer_details(
 
 fn validate_buyer_details(details: &BuyerDetails, requires_shipping: bool) -> Result<(), ApiError> {
     let email = details.email.trim();
-    if email.len() > 254 || !email.contains('@') || email.chars().any(char::is_control) {
+    if !valid_buyer_email(email) {
         return Err(ApiError::bad_request("Enter a valid email address."));
     }
     for (label, value, max) in [
@@ -185,8 +186,9 @@ fn validate_buyer_details(details: &BuyerDetails, requires_shipping: bool) -> Re
 
 pub async fn proxy_checkout(
     State(state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
+    RawQuery(raw): RawQuery,
 ) -> Result<Redirect, ApiError> {
+    let params = proxy_parameters(raw.as_deref().unwrap_or_default())?;
     let signature = params
         .get("signature")
         .ok_or_else(|| ApiError::forbidden("Shopify app proxy signature is missing."))?;
@@ -230,7 +232,7 @@ pub async fn proxy_checkout(
     let variant_gid = format!("gid://shopify/ProductVariant/{variant_number}");
     let response = state.http.post(format!("https://{shop}/admin/api/{API_VERSION}/graphql.json"))
         .header("X-Shopify-Access-Token", token)
-        .json(&serde_json::json!({"query":"query WorldzVariant($id: ID!) { productVariant(id: $id) { title requiresShipping price { amount currencyCode } product { title } metafield(namespace: \"worldz\", key: \"payment\") { value } } }","variables":{"id":variant_gid}}))
+        .json(&serde_json::json!({"query":"query WorldzVariant($id: ID!) { shop { currencyCode } productVariant(id: $id) { title price inventoryItem { requiresShipping } product { title } metafield(namespace: \"worldz\", key: \"payment\") { value } } }","variables":{"id":variant_gid}}))
         .send().await.map_err(|_| ApiError::unavailable("Shopify catalog lookup failed."))?;
     if !response.status().is_success() {
         return Err(ApiError::unavailable(
@@ -326,13 +328,13 @@ pub async fn proxy_checkout(
     if payment.amount.trim().len() > 64 {
         return Err(ApiError::bad_request("Shopify token price is too long."));
     }
-    let amount_display = payment.amount.trim();
+    let (amount, amount_display) = token_total(amount, quantity, decimals)?;
     let price = variant
-        .pointer("/price/amount")
+        .get("price")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let currency = variant
-        .pointer("/price/currencyCode")
+    let currency = catalog
+        .pointer("/data/shop/currencyCode")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     let title = variant
@@ -344,7 +346,7 @@ pub async fn proxy_checkout(
         .and_then(serde_json::Value::as_str)
         .unwrap_or("Default");
     let requires_shipping = variant
-        .get("requiresShipping")
+        .pointer("/inventoryItem/requiresShipping")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(true);
     if price.is_empty() || currency.len() != 3 {
@@ -365,7 +367,7 @@ pub async fn proxy_checkout(
     sqlx::query("INSERT INTO payment_links (slug,merchant_id,network_id,asset,amount,amount_display,display_name,expires_at,multi_pay,max_redemptions) VALUES (?,?,?,?,?,?,?,?,false,1)")
         .bind(&slug).bind(&merchant_id).bind(network_id.as_str()).bind(asset).bind(amount.to_string()).bind(amount_display).bind(&display_name).bind(Utc::now() + Duration::minutes(30))
         .execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO shopify_checkout_sessions (slug,shop_domain,variant_id,quantity,product_title,variant_title,unit_price,currency_code,requires_shipping) VALUES (?,?,?,?,?,?,?,?,?)")
+    sqlx::query("INSERT INTO shopify_checkout_sessions (slug,shop_domain,variant_id,quantity,product_title,variant_title,unit_price,currency_code,requires_shipping,quantity_priced) VALUES (?,?,?,?,?,?,?,?,?,TRUE)")
         .bind(&slug).bind(&shop).bind(variant_number.to_string()).bind(quantity as i32).bind(title).bind(variant_title).bind(price).bind(currency).bind(requires_shipping)
         .execute(&mut *tx).await?;
     tx.commit().await?;
@@ -380,37 +382,126 @@ pub async fn proxy_checkout(
     )))
 }
 
+fn proxy_parameters(raw: &str) -> Result<HashMap<String, String>, ApiError> {
+    let mut params = HashMap::<String, String>::new();
+    for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
+        if let Some(existing) = params.get_mut(key.as_ref()) {
+            if matches!(
+                key.as_ref(),
+                "signature" | "shop" | "timestamp" | "variant" | "quantity"
+            ) {
+                return Err(ApiError::bad_request(
+                    "Duplicate Shopify checkout parameter.",
+                ));
+            }
+            existing.push(',');
+            existing.push_str(&value);
+        } else {
+            params.insert(key.into_owned(), value.into_owned());
+        }
+    }
+    Ok(params)
+}
+
+fn token_total(unit: u128, quantity: u32, decimals: u8) -> Result<(u128, String), ApiError> {
+    if !(1..=99).contains(&quantity) {
+        return Err(ApiError::bad_request("Quantity must be between 1 and 99."));
+    }
+    let total = unit
+        .checked_mul(u128::from(quantity))
+        .ok_or_else(|| ApiError::bad_request("Payment total is too large."))?;
+    let digits = total.to_string();
+    let precision = usize::from(decimals);
+    let display = if precision == 0 {
+        digits
+    } else {
+        let padded = format!("{:0>width$}", digits, width = precision + 1);
+        let split = padded.len() - precision;
+        format!("{}.{}", &padded[..split], &padded[split..])
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    };
+    if display.len() > 64 {
+        return Err(ApiError::bad_request("Payment total is too long."));
+    }
+    Ok((total, display))
+}
+
+fn validate_checkout_pricing(quantity: i32, quantity_priced: bool) -> Result<(), ApiError> {
+    if !(1..=99).contains(&quantity) || (quantity > 1 && !quantity_priced) {
+        return Err(ApiError::conflict("This Shopify checkout uses outdated pricing. Return to the store and start a new checkout; a settled legacy order requires merchant review."));
+    }
+    Ok(())
+}
+
+fn valid_buyer_email(email: &str) -> bool {
+    if email.len() > 254 || !email.is_ascii() {
+        return false;
+    }
+    let Some((local, domain)) = email.split_once('@') else {
+        return false;
+    };
+    if local.is_empty()
+        || local.len() > 64
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+    {
+        return false;
+    }
+    if !local
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b".!#$%&'*+-/=?^_`{|}~".contains(&b))
+    {
+        return false;
+    }
+    let labels: Vec<_> = domain.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+        && labels
+            .last()
+            .is_some_and(|label| label.len() >= 2 && label.bytes().all(|b| b.is_ascii_alphabetic()))
+}
+
+pub fn validate_claim_buyer(state: &AppState, row: &PgRow) -> Result<(), ApiError> {
+    validate_checkout_pricing(row.try_get("quantity")?, row.try_get("quantity_priced")?)?;
+    let ciphertext: Option<Vec<u8>> = row.try_get("buyer_data_ciphertext")?;
+    let nonce: Option<Vec<u8>> = row.try_get("buyer_data_nonce")?;
+    let (ciphertext, nonce) = ciphertext.zip(nonce).ok_or_else(|| {
+        ApiError::conflict("Enter buyer details in the Shopify checkout before paying.")
+    })?;
+    let buyer = decrypt_private_json::<BuyerDetails>(state, &ciphertext, &nonce)?;
+    validate_buyer_details(&buyer, row.try_get("requires_shipping")?)
+}
+
 fn verify_proxy_signature(
     params: &HashMap<String, String>,
     signature: &str,
     secret: &str,
 ) -> Result<(), ApiError> {
-    let message = params
+    let mut pairs = params
         .iter()
         .filter(|(key, _)| key.as_str() != "signature")
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect::<BTreeMap<_, _>>()
-        .into_iter()
         .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join("&");
+        .collect::<Vec<_>>();
+    pairs.sort_unstable();
+    let message = pairs.concat();
+    let signature = hex::decode(signature)
+        .map_err(|_| ApiError::forbidden("Shopify app proxy signature is invalid."))?;
     let mut mac =
         <HmacSha256 as Mac>::new_from_slice(secret.as_bytes()).map_err(|_| ApiError::internal())?;
     mac.update(message.as_bytes());
-    let expected = hex::encode(mac.finalize().into_bytes());
-    if expected.len() != signature.len()
-        || !expected
-            .as_bytes()
-            .iter()
-            .zip(signature.as_bytes())
-            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
-            .eq(&0)
-    {
-        return Err(ApiError::forbidden(
-            "Shopify app proxy signature is invalid.",
-        ));
-    }
-    Ok(())
+    mac.verify_slice(&signature)
+        .map_err(|_| ApiError::forbidden("Shopify app proxy signature is invalid."))
 }
 
 fn decrypt_access_token(state: &AppState, row: &PgRow) -> Result<String, ApiError> {
@@ -500,9 +591,10 @@ pub fn spawn_order_sync_worker(state: AppState) {
 }
 
 async fn sync_shopify_order(state: &AppState, slug: &str) -> Result<String, ApiError> {
-    let row = sqlx::query("SELECT c.shop_domain,c.variant_id,c.quantity,c.product_title,c.variant_title,c.unit_price,c.currency_code,c.requires_shipping,c.buyer_data_ciphertext,c.buyer_data_nonce,s.access_token_ciphertext,s.access_token_nonce,o.order_id,o.network_id,o.amount,o.transaction_hash,o.settlement_receipt_id FROM shopify_checkout_sessions c JOIN shopify_shops s USING(shop_domain) JOIN orders o ON o.link_slug=c.slug WHERE c.slug=? AND o.state='SETTLED' AND o.settlement_receipt_id IS NOT NULL ORDER BY o.updated_at DESC LIMIT 1")
+    let row = sqlx::query("SELECT c.shop_domain,c.variant_id,c.quantity,c.product_title,c.variant_title,c.unit_price,c.currency_code,c.requires_shipping,c.buyer_data_ciphertext,c.buyer_data_nonce,c.quantity_priced,s.access_token_ciphertext,s.access_token_nonce,o.order_id,o.network_id,o.amount,o.transaction_hash,o.settlement_receipt_id FROM shopify_checkout_sessions c JOIN shopify_shops s USING(shop_domain) JOIN orders o ON o.link_slug=c.slug WHERE c.slug=? AND o.state='SETTLED' AND o.settlement_receipt_id IS NOT NULL ORDER BY o.updated_at DESC LIMIT 1")
         .bind(slug).fetch_optional(&state.pool).await?
         .ok_or_else(|| ApiError::conflict("Shopify checkout has no verified settled NEAR order."))?;
+    validate_checkout_pricing(row.try_get("quantity")?, row.try_get("quantity_priced")?)?;
     let shop: String = row.try_get("shop_domain")?;
     let access_token = decrypt_access_token(state, &row)?;
     let order_id: String = row.try_get("order_id")?;
@@ -543,6 +635,7 @@ async fn sync_shopify_order(state: &AppState, slug: &str) -> Result<String, ApiE
         .zip(buyer_nonce)
         .ok_or_else(|| ApiError::conflict("Shopify checkout is missing buyer details."))?;
     let buyer = decrypt_private_json::<BuyerDetails>(state, &buyer_ciphertext, &buyer_nonce)?;
+    validate_buyer_details(&buyer, requires_shipping)?;
     let network_id: String = row.try_get("network_id")?;
     let payment_amount: String = row.try_get("amount")?;
     let transaction_hash: String = row.try_get("transaction_hash")?;
@@ -867,26 +960,62 @@ mod tests {
     }
 
     #[test]
-    fn app_proxy_signature_authenticates_variant_and_store_parameters() {
-        let secret = "app-secret";
-        let mut params = HashMap::from([
-            ("shop".to_owned(), "demo.myshopify.com".to_owned()),
-            ("variant".to_owned(), "12345".to_owned()),
-            ("quantity".to_owned(), "2".to_owned()),
-        ]);
-        let message = params
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<BTreeMap<_, _>>()
-            .into_iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect::<Vec<_>>()
-            .join("&");
-        let mut mac = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(message.as_bytes());
-        let signature = hex::encode(mac.finalize().into_bytes());
-        assert!(verify_proxy_signature(&params, &signature, secret).is_ok());
-        params.insert("variant".to_owned(), "99999".to_owned());
-        assert!(verify_proxy_signature(&params, &signature, secret).is_err());
+    fn app_proxy_uses_shopify_published_fixture_with_repeated_parameters() {
+        // Shopify example query; digest independently generated with Python hmac
+        // over the literal sorted message (the docs use a placeholder shop).
+        let raw = "extra=1&extra=2&shop=%7Bshop%7D.myshopify.com&logged_in_customer_id=1&path_prefix=%2Fapps%2Fawesome_reviews&timestamp=1317327555";
+        let mut params = proxy_parameters(raw).unwrap();
+        assert!(verify_proxy_signature(
+            &params,
+            "e71d571c0a35d531ae367189d59afd33ae5b56be274c77c9e8bd6ce42e256304",
+            "hush"
+        )
+        .is_ok());
+        params.insert("extra".into(), "tampered".into());
+        assert!(verify_proxy_signature(
+            &params,
+            "e71d571c0a35d531ae367189d59afd33ae5b56be274c77c9e8bd6ce42e256304",
+            "hush"
+        )
+        .is_err());
+        assert!(proxy_parameters("quantity=1&quantity=99").is_err());
+    }
+
+    #[test]
+    fn legacy_multi_unit_links_cannot_issue_or_fulfil_an_undercharged_order() {
+        assert!(validate_checkout_pricing(2, false).is_err());
+        assert!(validate_checkout_pricing(99, false).is_err());
+        assert!(validate_checkout_pricing(1, false).is_ok());
+        assert!(validate_checkout_pricing(99, true).is_ok());
+    }
+
+    #[test]
+    fn token_quantity_is_exact_and_checked() {
+        assert_eq!(
+            token_total(1250000, 3, 6).unwrap(),
+            (3750000, "3.75".into())
+        );
+        assert_eq!(token_total(2, 99, 0).unwrap(), (198, "198".into()));
+        assert!(token_total(u128::MAX, 2, 24).is_err());
+        assert!(token_total(1, 0, 24).is_err());
+    }
+
+    #[test]
+    fn buyer_email_rejects_incomplete_local_parts_and_domains() {
+        for bad in [
+            "@",
+            "buyer@",
+            "buyer@@example.com",
+            ".buyer@example.com",
+            "buyer..name@example.com",
+            "buyer@example",
+            "buyer@-example.com",
+            "buyer@exam ple.com",
+        ] {
+            assert!(!valid_buyer_email(bad), "{bad}");
+        }
+        for good in ["buyer@example.com", "buyer+order@example.co.uk"] {
+            assert!(valid_buyer_email(good));
+        }
     }
 }

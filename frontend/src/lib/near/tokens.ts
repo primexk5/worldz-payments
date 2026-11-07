@@ -1,5 +1,6 @@
 import { NEAR_NATIVE_ASSET, NEAR_NETWORK_ID, NEAR_RPC_URL } from "./config";
 import type { NearAsset, TokenMetadata } from "./types";
+import { spendableNear } from "./spendable";
 
 export const nativeNearAsset: NearAsset = NEAR_NATIVE_ASSET;
 
@@ -57,12 +58,18 @@ export async function getNativeNearAvailableBalance(accountId: string): Promise<
       params: { request_type: "view_account", finality: "final", account_id: accountId },
     }),
   });
-  const result = (await response.json()) as { result?: { amount?: string; locked?: string }; error?: { message?: string } };
-  if (!response.ok || result.error || !result.result?.amount || result.result.locked == null) {
+  const result = (await response.json()) as { result?: { amount?: string; locked?: string; storage_usage?: number }; error?: { message?: string } };
+  if (!response.ok || result.error || !result.result?.amount || result.result.locked == null || result.result.storage_usage == null) {
     throw new Error(result.error?.message ?? "Could not read available NEAR balance.");
   }
-  const available = BigInt(result.result.amount) - BigInt(result.result.locked);
-  return available > 0n ? available : 0n;
+  const protocolResponse = await fetch(NEAR_RPC_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "worldz-storage-cost", method: "EXPERIMENTAL_protocol_config", params: { finality: "final" } }),
+  });
+  const protocol = await protocolResponse.json() as { result?: { runtime_config?: { storage_amount_per_byte?: string } } };
+  const perByte = protocol.result?.runtime_config?.storage_amount_per_byte;
+  if (!protocolResponse.ok || !perByte) throw new Error("Could not read the NEAR storage staking requirement.");
+  return spendableNear(result.result.amount, result.result.locked, result.result.storage_usage, perByte);
 }
 
 export async function estimateNearGasCostYocto(gasUnits: bigint): Promise<bigint> {

@@ -34,7 +34,7 @@ const body = (value: unknown) => JSON.stringify(value);
 
 export const nearApi = {
   request,
-  challenge(accountId: string, state: string, intent: { purpose: "login" | "onboarding" | "payout_update"; payoutAccountId?: string; displayName?: string; webhookUrl?: string } = { purpose: "login" }) {
+  challenge(accountId: string, state: string, intent: { purpose: "login" | "onboarding" | "payout_update" | "checkout"; checkoutSlug?: string; payoutAccountId?: string; displayName?: string; webhookUrl?: string } = { purpose: "login" }) {
     return request<AuthChallenge>("/auth/challenge", {
       method: "POST",
       body: body({ accountId, networkId: NEAR_NETWORK_ID, state, ...intent }),
@@ -85,11 +85,13 @@ export const nearApi = {
   link(slug: string) {
     return request<PaymentLink>(`/links/${encodeURIComponent(slug)}`);
   },
-  claimLink(slug: string, payerAccountId: string, customerName?: string) {
-    return request<LinkClaim>(`/links/${encodeURIComponent(slug)}/claim`, {
+  async claimLink(slug: string, payerAccountId: string, customerName?: string, proof?: {message:string;nonce:string;state:string;publicKey:string;signature:string}) {
+    const claim = await request<LinkClaim>(`/links/${encodeURIComponent(slug)}/claim`, {
       method: "POST",
-      body: body({ payerAccountId, networkId: NEAR_NETWORK_ID, customerName: customerName?.trim() || undefined }),
+      body: body({ payerAccountId, networkId: NEAR_NETWORK_ID, customerName: customerName?.trim() || undefined, proof }),
     });
+    if (claim.editToken && typeof window !== "undefined") window.sessionStorage.setItem(`worldz:receipt-edit:${claim.merchantId}:${claim.orderId}`, claim.editToken);
+    return claim;
   },
   paymentReadiness() {
     return request<void>(`/payment-readiness?networkId=${NEAR_NETWORK_ID}`, { cache: "no-store" });
@@ -102,7 +104,7 @@ export const nearApi = {
   submitPaymentMeta(merchantId: string, orderId: string, customerName?: string, slug?: string, transactionHash?: string) {
     return request<void>(`/orders/${encodeURIComponent(merchantId)}/${encodeURIComponent(orderId)}/meta`, {
       method: "POST",
-      body: body({ customerName, slug, transactionHash, networkId: NEAR_NETWORK_ID }),
+      body: body({ customerName, slug, transactionHash, networkId: NEAR_NETWORK_ID, editToken: typeof window === "undefined" ? undefined : window.sessionStorage.getItem(`worldz:receipt-edit:${merchantId}:${orderId}`) ?? undefined }),
     });
   },
   apiKeys() {

@@ -9,6 +9,7 @@ import { MonoLabel } from "@/components/atoms/mono-label";
 import { NearReceipt } from "@/components/checkout/near-receipt";
 import { useNearWallet } from "@/components/providers/near-wallet-provider";
 import { nearApi } from "@/lib/near/api";
+import { claimPaymentLinkWithNearWallet } from "@/lib/near/auth";
 import { NEAR_EXPLORER_URL, NEAR_NETWORK_ID } from "@/lib/near/config";
 import { calculateFee, calculateNet } from "@/lib/near/amounts";
 import { clearPendingPayment, getPendingPaymentForSlug, isVerifiedSettlement, registerFungibleTokenRecipients, savePendingPayment, submitAuthorizedPayment, TokenStorageRequiredError, waitForVerifiedSettlement, type PendingPayment } from "@/lib/near/payment";
@@ -77,7 +78,7 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
   const nameMerchantId=pending?.merchantId??claim?.merchantId;
   const nameOrderId=pending?.orderId??claim?.orderId;
   useEffect(()=>{
-    if(!nameMerchantId||!nameOrderId||!customerName.trim()||state==="refunded")return;
+    if(!nameMerchantId||!nameOrderId||!customerName.trim()||state==="refunded"||state==="settled")return;
     let active=true;
     let timer:ReturnType<typeof setTimeout>;
     const sync=async()=>{
@@ -95,7 +96,7 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
     if(!wallet||!accountId){await connectWallet();return;}
     setState("claiming");setMessage(null);setStorageIssue(null);
     try{
-      const currentClaim=await nearApi.claimLink(slug,accountId,customerName);
+      const currentClaim=await claimPaymentLinkWithNearWallet(wallet,accountId,slug,customerName);
       setClaim(currentClaim);
       const submitted=await submitAuthorizedPayment({wallet,accountId,claim:currentClaim,linkSlug:slug,customerName,onSubmitted:(value)=>{setPending(value);setState("awaiting-wallet");}});
       setPending(submitted);
@@ -140,7 +141,7 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
         {state==="refunded"&&<div className="mt-4 rounded-xl border border-line bg-paper p-4 text-xs">The order was refunded. Check your wallet for the returned funds.</div>}
         {message&&<p role="alert" className="mt-4 rounded-xl border border-alert/20 bg-alert/5 p-3 text-xs leading-5 text-alert">{message}</p>}
         {storageIssue&&<div className="mt-4 rounded-xl border border-amber-500/25 bg-amber/10 p-4"><p className="text-xs leading-5">The token requires storage registration for {storageIssue.accountIds.length} receiving account(s). Required deposit is {formatAssetAmount(storageIssue.minimumDeposit,{type:"native",symbol:"NEAR",decimals:24})} per account.</p><button onClick={()=>void registerStorage()} disabled={registering} className="mt-3 inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-4 text-xs font-medium disabled:opacity-50">{registering?<LoaderCircle size={13} className="animate-spin"/>:<Check size={13}/>}Register token accounts</button></div>}
-        {state!=="processing"&&state!=="refunded"&&<button onClick={()=>void pay()} disabled={connecting||state==="claiming"||state==="awaiting-wallet"} className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{connecting||state==="claiming"||state==="awaiting-wallet"?<LoaderCircle size={16} className="animate-spin"/>:<WalletCards size={16} className="text-signal"/>}{!accountId?"Connect NEAR wallet":state==="claiming"?"Preparing order…":state==="awaiting-wallet"?"Approve in your wallet…":"Pay with NEAR wallet"}<ArrowRight size={14}/></button>}
+        {state!=="processing"&&state!=="refunded"&&<button onClick={()=>void pay()} disabled={connecting||state==="claiming"||state==="awaiting-wallet"} className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{connecting||state==="claiming"||state==="awaiting-wallet"?<LoaderCircle size={16} className="animate-spin"/>:<WalletCards size={16} className="text-signal"/>}{!accountId?"Connect NEAR wallet":state==="claiming"?"Verify checkout in your wallet…":state==="awaiting-wallet"?"Approve in your wallet…":"Pay with NEAR wallet"}<ArrowRight size={14}/></button>}
         <p className="mt-4 flex items-center justify-center gap-2 text-center text-[11px] leading-5 text-mist"><ShieldCheck size={13} className="shrink-0 text-green-deep"/>Your keys stay in your wallet. Check order status before retrying a pending payment.</p>
       </div>}
     </section></div></main>;

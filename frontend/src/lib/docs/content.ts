@@ -220,7 +220,7 @@ if (!response.ok) {
 const link = await response.json(); // HTTP 201; PaymentLink object
 const paymentUrl = new URL("/pay/" + link.slug, process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin);
 console.log(paymentUrl.toString());` },
-      { type: "table", headers: ["Field", "Required value / meaning"], rows: [["networkId", "testnet or mainnet, matching the configured deployment."], ["asset", "Native NEAR: type native, symbol NEAR, decimals 24. For NEP-141 include the allowed contractId, symbol and decimals."], ["amount", "Positive base-unit integer string, within the supported u128 range."], ["amountDisplay", "Matching decimal string, e.g. 25. No scientific notation or silent rounding."], ["displayName", "Item/service description, up to 80 characters. An empty string is allowed."], ["expiresAtSeconds", "A future Unix timestamp in seconds, or null for no link expiry."], ["multiPay", "false for one claim; true for repeated claims."], ["maxRedemptions", "1 for a single-use link; a positive count for a limited repeated link; 0 or null for unlimited repeated claims."]] },
+      { type: "table", headers: ["Field", "Required value / meaning"], rows: [["networkId", "testnet or mainnet, matching the configured deployment."], ["asset", "Native NEAR: type native, symbol NEAR, decimals 24. For NEP-141 include the allowed contractId, symbol and decimals."], ["amount", "Positive base-unit integer string, within the supported u128 range."], ["amountDisplay", "Matching decimal string, e.g. 25. No scientific notation or silent rounding."], ["displayName", "Item/service description, up to 80 characters. An empty string is allowed."], ["expiresAtSeconds", "A future Unix timestamp in seconds, or null for no link expiry."], ["multiPay", "false for one verified payment; true for repeated payments."], ["maxRedemptions", "1 for a single-use link; a positive count for a limited repeated link; 0 or null for unlimited repeated payments."]] },
       { type: "paragraph", text: "The response includes slug, merchantId, payoutAccountId, asset, amount, displayName, expiry and claim counts. Construct the hosted payment URL from the returned slug; a checkoutUrl field is not returned." },
     ],
   },
@@ -228,7 +228,7 @@ console.log(paymentUrl.toString());` },
     id: "custom-checkout", group: "Build an integration", title: "Custom checkout & status", description: "Claim an order, submit it with a wallet and follow settlement.", keywords: "custom checkout SDK integration wallet signing claim authorization polling status fulfil fulfill idempotent",
     blocks: [
       { type: "paragraph", text: "The simplest website integration is a link to /pay/{slug}. For a custom experience inside this project, use the payment helpers so token preflight, signed order terms, submission metadata and recovery stay consistent with hosted checkout." },
-      { type: "code", title: "Source-client checkout example · browser", language: "TypeScript", code: `import { nearApi } from "@/lib/near/api";
+      { type: "code", title: "Source-client checkout example · browser", language: "TypeScript", code: `import { claimPaymentLinkWithNearWallet } from "@/lib/near/auth";
 import { connectNearWallet } from "@/lib/near/wallet";
 import {
   submitAuthorizedPayment,
@@ -238,10 +238,8 @@ import {
 
 // slug is the payment link slug returned by the API.
 const { wallet, accountId } = await connectNearWallet();
-const claim = await nearApi.claimLink(slug, accountId);
-// Optional; save the customer-supplied name before requesting payment.
-await nearApi.submitPaymentMeta(
-  claim.merchantId, claim.orderId, "Ada Okafor", slug
+const claim = await claimPaymentLinkWithNearWallet(
+  wallet, accountId, slug, "Ada Okafor"
 );
 const submitted = await submitAuthorizedPayment({
   wallet, accountId, claim, linkSlug: slug,
@@ -322,7 +320,7 @@ export function verifyWorldzWebhook(rawBody, signature, secret) {
   {
     id: "troubleshooting", group: "Manage & troubleshoot", title: "Troubleshooting", description: "Find the cause before retrying a payment.", keywords: "error failed 400 401 404 409 500 502 503 wallet pending timeout storage token receipt missing",
     blocks: [
-      { type: "table", headers: ["Issue", "What to check"], rows: [["Wallet connects but dashboard redirects to login", "Connect and approve the sign-in message. A wallet connection alone is not a merchant session."], ["Different account or network", "Select the original merchant wallet for sign-in. Match the network shown in checkout and wallet."], ["Insufficient balance", "Check the payment asset balance and native NEAR for gas or required token storage."], ["Token is unavailable", "Read /assets for the current network. Arbitrary token contracts cannot be used as enabled assets."], ["Link expired or claim limit reached", "Ask the merchant for a new link. A used claim can consume a limit even before settlement."], ["Payment remains processing", "Keep the existing order and transaction hash. Refresh status or inspect NEAR Explorer. Do not pay again."], ["Receipt is unavailable", "Require SETTLED plus a settlement receipt ID. A pending payment does not have a final receipt."], ["Payer name or item is missing", "Older records can lack those fields. Enter the item when creating new links and the payer name before payment."], ["Webhook is not arriving", "Check the saved HTTPS endpoint, public DNS, signing-secret configuration, response status and delivery lastError."]] },
+      { type: "table", headers: ["Issue", "What to check"], rows: [["Wallet connects but dashboard redirects to login", "Connect and approve the sign-in message. A wallet connection alone is not a merchant session."], ["Different account or network", "Select the original merchant wallet for sign-in. Match the network shown in checkout and wallet."], ["Insufficient balance", "Check the payment asset balance and native NEAR for gas or required token storage."], ["Token is unavailable", "Read /assets for the current network. Arbitrary token contracts cannot be used as enabled assets."], ["Link expired or claim limit reached", "Ask the merchant for a new link. Unpaid reservations expire after finalized network checks; verified payments consume the limit."], ["Payment remains processing", "Keep the existing order and transaction hash. Refresh status or inspect NEAR Explorer. Do not pay again."], ["Receipt is unavailable", "Require SETTLED plus a settlement receipt ID. A pending payment does not have a final receipt."], ["Payer name or item is missing", "Older records can lack those fields. Enter the item when creating new links and the payer name before payment."], ["Webhook is not arriving", "Check the saved HTTPS endpoint, public DNS, signing-secret configuration, response status and delivery lastError."]] },
       { type: "code", title: "Handle an API error", language: "JavaScript", code: `const response = await fetch("/api/v1/me", { credentials: "include" });
 if (!response.ok) {
   const problem = await response.json().catch(() => ({}));

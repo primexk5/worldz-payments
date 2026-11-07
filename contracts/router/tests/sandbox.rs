@@ -131,6 +131,24 @@ async fn sandbox_native_exact_payment_snapshots_fee_and_survives_router_redeploy
     let order_key = hex::encode(payload.replay_key()?);
     let payout_before = payout.view_account().await?.balance.as_yoctonear();
     let fee_before = fee.view_account().await?.balance.as_yoctonear();
+    let before_attack: Value = router.view("get_config").await?.json()?;
+    let mut forged = payload.clone();
+    forged.merchant_account_id = payer.id().to_string();
+    let attack = payer
+        .call(router.id(), "cancel_authorization")
+        .args_json(json!({"authorization":forged,"signature":signature.clone()}))
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(
+        attack.into_result().is_err(),
+        "forged merchant must not cancel a valid payment"
+    );
+    let after_attack: Value = router.view("get_config").await?.json()?;
+    assert_eq!(
+        before_attack["storageReserveYocto"],
+        after_attack["storageReserveYocto"]
+    );
     payer
         .call(router.id(), "pay_native")
         .args_json(json!({ "authorization": payload.clone(), "signature": signature.clone() }))

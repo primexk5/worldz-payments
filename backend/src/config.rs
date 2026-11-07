@@ -24,6 +24,7 @@ pub struct AppConfig {
     pub port: u16,
     pub database_url: String,
     pub auth_recipient: String,
+    pub auth_network_id: NetworkId,
     pub auth_challenge_ttl_seconds: i64,
     pub session_cookie_name: String,
     pub session_ttl_hours: i64,
@@ -58,6 +59,15 @@ impl AppConfig {
             port: parse("APP_PORT", 8080u16)?,
             database_url: required("DATABASE_URL")?,
             auth_recipient: required("AUTH_RECIPIENT")?,
+            auth_network_id: match value("AUTH_NETWORK_ID", "testnet").as_str() {
+                "testnet" => NetworkId::Testnet,
+                "mainnet" => NetworkId::Mainnet,
+                _ => {
+                    return Err(ApiError::configuration(
+                        "AUTH_NETWORK_ID must be testnet or mainnet",
+                    ))
+                }
+            },
             auth_challenge_ttl_seconds: parse("AUTH_CHALLENGE_TTL_SECONDS", 300i64)?,
             session_cookie_name: value("SESSION_COOKIE_NAME", "worldz_session"),
             session_ttl_hours: parse("SESSION_TTL_HOURS", 168i64)?,

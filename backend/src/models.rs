@@ -135,6 +135,7 @@ pub struct ChallengeRequest {
     pub payout_account_id: Option<String>,
     pub display_name: Option<String>,
     pub webhook_url: Option<String>,
+    pub checkout_slug: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -143,6 +144,7 @@ pub enum ChallengePurpose {
     Login,
     Onboarding,
     PayoutUpdate,
+    Checkout,
 }
 
 impl ChallengePurpose {
@@ -151,6 +153,7 @@ impl ChallengePurpose {
             Self::Login => "login",
             Self::Onboarding => "onboarding",
             Self::PayoutUpdate => "payout_update",
+            Self::Checkout => "checkout",
         }
     }
 }
@@ -245,11 +248,13 @@ pub struct ClaimLinkRequest {
     pub payer_account_id: String,
     pub network_id: NetworkId,
     pub customer_name: Option<String>,
+    pub proof: Option<WalletProof>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentMetaRequest {
+    pub edit_token: Option<String>,
     pub network_id: NetworkId,
     pub customer_name: Option<String>,
     pub slug: Option<String>,
@@ -289,6 +294,7 @@ pub struct AuthSessionDto {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkClaimDto {
+    pub edit_token: String,
     pub order_id: String,
     pub merchant_id: String,
     pub payer_account_id: String,

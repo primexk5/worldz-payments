@@ -58,7 +58,11 @@ async fn index_network(
     };
     let end = tip.min(height.saturating_add(MAX_BLOCKS_PER_TICK.saturating_sub(1)));
     while height <= end {
-        let block = near_rpc::finalized_block(state, network_id, height).await?;
+        let block = near_rpc::next_finalized_block(state, network_id, height, tip).await?;
+        height = block
+            .pointer("/header/height")
+            .and_then(Value::as_u64)
+            .ok_or("finalized block height is missing")?;
         let chunks = block
             .get("chunks")
             .and_then(Value::as_array)

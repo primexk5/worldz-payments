@@ -61,6 +61,7 @@ export interface PaymentLink {
 }
 
 export interface LinkClaim {
+  editToken?: string;
   orderId: string;
   merchantId: string;
   payerAccountId: string;
@@ -137,7 +138,7 @@ export interface AuthChallenge {
   state: string;
   networkId: NearNetworkId;
   expiresAtSeconds: number;
-  purpose?: "login" | "onboarding" | "payout_update";
+  purpose?: "login" | "onboarding" | "payout_update" | "checkout";
 }
 
 export interface AuthSession {

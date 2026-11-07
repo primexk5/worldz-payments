@@ -100,3 +100,15 @@ export async function updatePayoutWithNearWallet(input: {
     },
   });
 }
+
+/** Prove ownership before reserving a capped link or issuing its private edit token. */
+export async function claimPaymentLinkWithNearWallet(wallet: NearWalletBase, accountId: string, slug: string, customerName?: string) {
+  const state = crypto.randomUUID();
+  const challenge = await nearApi.challenge(accountId, state, { purpose: "checkout", checkoutSlug: slug });
+  if (challenge.networkId !== NEAR_NETWORK_ID || challenge.state !== state || challenge.purpose !== "checkout" || !challenge.message.split("\n").includes(`Checkout: ${slug}`)) {
+    throw new Error("The checkout verification did not match this payment link.");
+  }
+  const signed = await wallet.signMessage({ message: challenge.message, recipient: challenge.recipient, nonce: decodeNearNonce(challenge.nonce), network: NEAR_NETWORK_ID });
+  if (signed.accountId !== accountId) throw new Error("Verify checkout with the wallet account that will pay.");
+  return nearApi.claimLink(slug, accountId, customerName, { message: challenge.message, nonce: challenge.nonce, state, publicKey: signed.publicKey, signature: signed.signature });
+}

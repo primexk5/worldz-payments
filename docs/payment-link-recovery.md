@@ -59,10 +59,13 @@ order. Pending or partial payouts remain locked. A failed receipt can consume ga
 even though the attached payment is returned. The observed transaction returned
 the attached 0.2 NEAR to the payer; gas was charged separately.
 
-An authorization expires after 15 minutes. Claiming the link again reuses an
-existing unpaid order for that payer and renews its signature when necessary,
-preserving the nonce and replay key. This does not consume another redemption
-and prevents an older wallet authorization from paying the same order twice.
+An authorization expires after 15 minutes. Claiming the link again requires a wallet ownership proof bound to that link.
+An active unpaid reservation keeps its replay key; a capped reservation cannot
+be extended indefinitely. An expired capped reservation is released only after
+finalized chain time has passed its authorization deadline and the router has no
+order. A fresh reservation can then be issued. Verified settlements consume the
+redemption counter. Apply the included backend migration and deploy the updated
+frontend and backend together.
 
 ## Validation
 

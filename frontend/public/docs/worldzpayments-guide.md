@@ -397,8 +397,8 @@ console.log(paymentUrl.toString());
 | amountDisplay | Matching decimal string, e.g. 25. No scientific notation or silent rounding. |
 | displayName | Item/service description, up to 80 characters. An empty string is allowed. |
 | expiresAtSeconds | A future Unix timestamp in seconds, or null for no link expiry. |
-| multiPay | false for one claim; true for repeated claims. |
-| maxRedemptions | 1 for a single-use link; a positive count for a limited repeated link; 0 or null for unlimited repeated claims. |
+| multiPay | false for one verified payment; true for repeated payments. |
+| maxRedemptions | 1 for a single-use link; a positive count for a limited repeated link; 0 or null for unlimited repeated payments. |
 
 The response includes slug, merchantId, payoutAccountId, asset, amount, displayName, expiry and claim counts. Construct the hosted payment URL from the returned slug; a checkoutUrl field is not returned.
 
@@ -413,7 +413,7 @@ The simplest website integration is a link to /pay/{slug}. For a custom experien
 ### Source-client checkout example · browser
 
 ```ts
-import { nearApi } from "@/lib/near/api";
+import { claimPaymentLinkWithNearWallet } from "@/lib/near/auth";
 import { connectNearWallet } from "@/lib/near/wallet";
 import {
   submitAuthorizedPayment,
@@ -423,10 +423,8 @@ import {
 
 // slug is the payment link slug returned by the API.
 const { wallet, accountId } = await connectNearWallet();
-const claim = await nearApi.claimLink(slug, accountId);
-// Optional; save the customer-supplied name before requesting payment.
-await nearApi.submitPaymentMeta(
-  claim.merchantId, claim.orderId, "Ada Okafor", slug
+const claim = await claimPaymentLinkWithNearWallet(
+  wallet, accountId, slug, "Ada Okafor"
 );
 const submitted = await submitAuthorizedPayment({
   wallet, accountId, claim, linkSlug: slug,
@@ -564,7 +562,7 @@ Find the cause before retrying a payment.
 | Different account or network | Select the original merchant wallet for sign-in. Match the network shown in checkout and wallet. |
 | Insufficient balance | Check the payment asset balance and native NEAR for gas or required token storage. |
 | Token is unavailable | Read /assets for the current network. Arbitrary token contracts cannot be used as enabled assets. |
-| Link expired or claim limit reached | Ask the merchant for a new link. A used claim can consume a limit even before settlement. |
+| Link expired or claim limit reached | Ask the merchant for a new link. Unpaid reservations expire after finalized network checks; verified payments consume the limit. |
 | Payment remains processing | Keep the existing order and transaction hash. Refresh status or inspect NEAR Explorer. Do not pay again. |
 | Receipt is unavailable | Require SETTLED plus a settlement receipt ID. A pending payment does not have a final receipt. |
 | Payer name or item is missing | Older records can lack those fields. Enter the item when creating new links and the payer name before payment. |

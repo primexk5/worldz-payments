@@ -266,7 +266,9 @@ impl Router {
     }
 
     #[payable]
-    pub fn cancel_authorization(&mut self, authorization: AuthorizationPayload) {
+    pub fn cancel_authorization(&mut self, authorization: AuthorizationPayload, signature: String) {
+        self.validate_signed_terms(&authorization, &signature)
+            .unwrap_or_else(|reason| env::panic_str(&reason));
         let merchant = account_id(&authorization.merchant_account_id)
             .unwrap_or_else(|_| env::panic_str("invalid merchant account ID"));
         assert_eq!(
@@ -274,8 +276,6 @@ impl Router {
             merchant,
             "only the authenticated merchant identity can cancel"
         );
-        self.validate_terms(&authorization)
-            .unwrap_or_else(|reason| env::panic_str(&reason));
         let key = authorization
             .replay_key()
             .expect("replay key encoding failed");
@@ -720,6 +720,15 @@ impl Router {
                 return Err("authorization is bound to a different payer".into());
             }
         }
+        self.validate_signed_terms(payload, signature_b64)
+    }
+
+    fn validate_signed_terms(
+        &self,
+        payload: &AuthorizationPayload,
+        signature_b64: &str,
+    ) -> Result<(), String> {
+        self.validate_terms(payload)?;
         let public_key = self
             .signer_keys
             .get(&payload.signer_key_id)
@@ -1269,8 +1278,51 @@ mod tests {
         let signature = sign(&authorization, &signing_key);
         let merchant_identity = id(&authorization.merchant_account_id);
         testing_env!(context(&router_id, &merchant_identity, 0, 1_900_000_001));
-        router.cancel_authorization(authorization.clone());
+        router.cancel_authorization(authorization.clone(), signature.clone());
         testing_env!(context(&router_id, &payer, GROSS, 1_900_000_002));
         let _should_not_schedule = router.pay_native(authorization, signature);
+    }
+
+    #[test]
+    fn forged_merchant_cannot_cancel_or_consume_sponsored_storage() {
+        let (mut router, signing_key, router_id, _, _, _) = deployment();
+        let original = payload();
+        let signature = sign(&original, &signing_key);
+        let mut forged = original.clone();
+        forged.merchant_account_id = "attacker.testnet".into();
+        assert_eq!(original.replay_key().unwrap(), forged.replay_key().unwrap());
+        let reserve = router.storage_reserve_yocto;
+        testing_env!(context(
+            &router_id,
+            &id("attacker.testnet"),
+            0,
+            1_900_000_001
+        ));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            router.cancel_authorization(forged, signature)
+        }));
+        assert!(result.is_err());
+        assert_eq!(router.storage_reserve_yocto, reserve);
+        assert!(!router.used_orders.contains(&original.replay_key().unwrap()));
+    }
+
+    #[test]
+    fn fabricated_authorization_cannot_write_a_cancellation_marker() {
+        let (mut router, _, router_id, _, _, _) = deployment();
+        let authorization = payload();
+        testing_env!(context(
+            &router_id,
+            &id(&authorization.merchant_account_id),
+            0,
+            1_900_000_001
+        ));
+        let reserve = router.storage_reserve_yocto;
+        let key = authorization.replay_key().unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            router.cancel_authorization(authorization, BASE64.encode([0u8; 64]))
+        }));
+        assert!(result.is_err());
+        assert_eq!(router.storage_reserve_yocto, reserve);
+        assert!(!router.used_orders.contains(&key));
     }
 }

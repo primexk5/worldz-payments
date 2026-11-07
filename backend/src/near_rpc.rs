@@ -185,6 +185,25 @@ pub async fn transaction_status(
 
 #[cfg(test)]
 mod signer_tests {
+    #[test]
+    fn skipped_height_requires_a_verified_predecessor_gap() {
+        let next = serde_json::json!({"header":{"height":105,"prev_hash":"previous"}});
+        let previous = serde_json::json!({"header":{"height":100,"hash":"previous"}});
+        assert!(super::proves_skipped_height(101, &next, &previous));
+        assert!(!super::proves_skipped_height(100, &next, &previous));
+        assert!(!super::proves_skipped_height(105, &next, &previous));
+        assert!(!super::proves_skipped_height(
+            101,
+            &next,
+            &serde_json::json!({"header":{"height":101,"hash":"previous"}})
+        ));
+        assert!(!super::proves_skipped_height(
+            101,
+            &next,
+            &serde_json::json!({"header":{"height":100,"hash":"different"}})
+        ));
+    }
+
     use super::*;
 
     #[test]
@@ -211,6 +230,62 @@ pub async fn finalized_tip(state: &AppState, network_id: NetworkId) -> Result<u6
         .and_then(|header| header.get("height"))
         .and_then(Value::as_u64)
         .ok_or_else(|| ApiError::unavailable("NEAR RPC returned an invalid final block."))
+}
+
+pub async fn finalized_timestamp_seconds(
+    state: &AppState,
+    network_id: NetworkId,
+) -> Result<u64, ApiError> {
+    let block = rpc(state, network_id, "block", json!({"finality":"final"})).await?;
+    block
+        .pointer("/header/timestamp_nanosec")
+        .and_then(Value::as_str)
+        .and_then(|v| v.parse::<u64>().ok())
+        .or_else(|| block.pointer("/header/timestamp").and_then(Value::as_u64))
+        .map(|value| value / 1_000_000_000)
+        .ok_or_else(|| ApiError::unavailable("Finalized block timestamp is missing."))
+}
+
+fn proves_skipped_height(height: u64, next: &Value, previous: &Value) -> bool {
+    let before = previous.pointer("/header/height").and_then(Value::as_u64);
+    let after = next.pointer("/header/height").and_then(Value::as_u64);
+    before.is_some_and(|v| v < height)
+        && after.is_some_and(|v| v > height)
+        && next
+            .pointer("/header/prev_hash")
+            .and_then(Value::as_str)
+            .is_some()
+        && next.pointer("/header/prev_hash") == previous.pointer("/header/hash")
+}
+
+pub async fn next_finalized_block(
+    state: &AppState,
+    network_id: NetworkId,
+    height: u64,
+    tip: u64,
+) -> Result<Value, ApiError> {
+    let error = match finalized_block(state, network_id, height).await {
+        Ok(block) => return Ok(block),
+        Err(error) => error,
+    };
+    // An UNKNOWN_BLOCK alone can also mean a pruned or unavailable block. Prove
+    // the gap using the next actual block's predecessor before advancing.
+    for candidate in height.saturating_add(1)..=tip.min(height.saturating_add(64)) {
+        let Ok(next) = finalized_block(state, network_id, candidate).await else {
+            continue;
+        };
+        let hash = next
+            .pointer("/header/prev_hash")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::unavailable("Finalized block predecessor is missing."))?;
+        let previous = rpc(state, network_id, "block", json!({"block_id":hash})).await?;
+        return if proves_skipped_height(height, &next, &previous) {
+            Ok(next)
+        } else {
+            Err(error)
+        };
+    }
+    Err(error)
 }
 
 pub async fn finalized_block(
