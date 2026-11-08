@@ -88,7 +88,7 @@ export function PaymentLinksPromotion() {
         </div>
         <div className="order-1 lg:order-2"><span className="mb-5 inline-flex rounded-full border border-line bg-white/50 px-3 py-1.5 text-[10px] font-medium">No storefront required</span><h2 className="site-heading">A payment link.<br/>A world of <em className="font-serif font-normal italic text-green-deep">possibility.</em></h2><p className="site-description mt-5 max-w-md">From a client deposit to your next social sale. Set your amount, create a link and give customers a clear way to pay from their NEAR wallet.</p>
           <div className="mt-7 grid grid-cols-3 gap-3 border-y border-line py-5">{[["01", "Create a link"], ["02", "Share it anywhere"], ["03", "Track settlement"]].map(([number, title]) => <div key={number}><span className="font-mono text-[10px] text-green-deep">{number}</span><p className="mt-2 text-xs leading-5 font-medium">{title}</p></div>)}</div>
-          <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-2"><Link href="/dashboard/links" className={actionClass}>Create a payment link<ArrowUpRight size={16}/></Link><Link href="/checkout/demo" className={textActionClass}>Try the checkout<ArrowRight size={15}/></Link></div>
+          <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-2"><Link href="/dashboard/links" className={actionClass}>Create a payment link<ArrowUpRight size={16}/></Link><Link href="/checkout/demo" className={textActionClass}>Watch the demo<ArrowRight size={15}/></Link></div>
         </div>
       </div>
     </section>

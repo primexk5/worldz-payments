@@ -6,7 +6,7 @@ import { PrivacySettingsButton } from "@/components/organisms/privacy-notice";
 
 const groups = [
   { title: "Product", links: [["Checkout", "/checkout/demo"], ["Payment links", "/payment-links"], ["Merchant dashboard", "/dashboard"], ["Pricing", "/pricing"]] },
-  { title: "Resources", links: [["How it works", "/#how-it-works"], ["Settlement", "/settlement"], ["Documentation", "/docs"], ["Developer reference", "/docs#typescript-client"], ["Try the demo", "/checkout/demo"]] },
+  { title: "Resources", links: [["How it works", "/#how-it-works"], ["Settlement", "/settlement"], ["Documentation", "/docs"], ["Developer reference", "/docs#typescript-client"], ["Watch the demo", "/checkout/demo"]] },
   { title: "WorldzPayments", links: [["About us", "/about"], ["Create an account", "/onboarding"], ["Sign in", "/login"], ["Terms of service", "/terms"], ["Rules & violations", "/terms#acceptable-use"], ["Privacy & cookies", "/privacy"]] },
 ];
 

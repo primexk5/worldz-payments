@@ -1,14 +1,29 @@
-"use client";
-
+import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CheckCircle2, CirclePlay, LockKeyhole } from "lucide-react";
-import { useState } from "react";
-import { NearLogo } from "@/components/atoms/near-logo";
+import { ArrowLeft, ArrowRight, Play } from "lucide-react";
 import { BrandMark } from "@/components/atoms/brand-mark";
 import { MonoLabel } from "@/components/atoms/mono-label";
-import { NEAR_NETWORK_ID } from "@/lib/near/config";
 
-export default function CheckoutDemoPage() {
-  const [showConfirmation,setShowConfirmation]=useState(false);
-  return <main className="min-h-screen bg-paper px-5 py-8 sm:py-12"><div className="mx-auto w-full max-w-[500px]"><header className="flex items-center justify-between"><BrandMark/><Link href="/" className="inline-flex items-center gap-2 text-xs text-mist hover:text-ink"><ArrowLeft size={14}/>Home</Link></header><div className="mt-8 rounded-xl border border-amber/40 bg-amber/10 p-4"><p className="flex items-center gap-2 text-xs font-medium text-amber-800"><CirclePlay size={15}/>Interactive demo · no transaction is sent</p><p className="mt-2 text-xs leading-5 text-amber-900/70">This preview does not connect to a wallet, create an order, or report a real payment.</p></div><section className="mt-5 rounded-[24px] border border-line bg-white p-6 shadow-[0_14px_55px_rgba(11,15,14,.07)]"><div className="flex items-center gap-2"><NearLogo className="size-4"/><MonoLabel>Worldz store · {NEAR_NETWORK_ID}</MonoLabel></div><h1 className="mt-2 text-xl font-semibold">Ada Studio</h1><p className="mt-1 text-xs text-mist">Everyday objects, made with care.</p><div className="my-6 rounded-[20px] bg-paper p-5 text-center"><p className="font-mono text-[11px] uppercase tracking-wider text-mist">Total to pay</p><p className="mt-3 text-4xl font-semibold">25.00 <span className="text-sm text-green-deep">NEAR</span></p></div><div className="flex items-center gap-3 rounded-xl border border-line p-4"><span className="grid size-9 place-items-center rounded-lg bg-ink text-signal"><LockKeyhole size={16}/></span><div><p className="text-xs font-medium">Non-custodial checkout</p><p className="mt-1 text-[11px] text-mist">A real checkout would show the verified payout account and settlement details here.</p></div></div>{showConfirmation?<div className="mt-5 rounded-xl border border-green-deep/20 bg-green-deep/5 p-4"><p className="flex items-center gap-2 text-xs font-medium text-green-deep"><CheckCircle2 size={15}/>Demo complete</p><p className="mt-2 text-xs leading-5 text-mist">No wallet signature or NEAR transaction occurred. This confirmation is only part of the demonstration.</p></div>:<button onClick={()=>setShowConfirmation(true)} className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-ink text-xs font-medium text-paper">Preview demo confirmation <ArrowRight size={15} className="text-signal"/></button>}</section></div></main>;
+export const metadata: Metadata = {
+  title: "Watch the demo — WorldzPayments",
+  description: "See WorldzPayments in action in our 60-second product video.",
+};
+
+export default function DemoPage() {
+  return <main id="main-content" className="min-h-screen bg-paper px-5 py-8 text-ink sm:px-8 sm:py-12"><div className="mx-auto max-w-[1100px]">
+    <header className="flex items-center justify-between"><BrandMark /><Link href="/" className="inline-flex min-h-11 items-center gap-2 text-xs text-mist hover:text-ink"><ArrowLeft size={14} />Back to home</Link></header>
+    <section className="mt-10 sm:mt-14" aria-labelledby="demo-title">
+      <MonoLabel>WorldzPayments · Product demo</MonoLabel>
+      <h1 id="demo-title" className="mt-4 text-4xl font-semibold tracking-tight sm:text-5xl">See how payments should feel.</h1>
+      <p id="demo-description" className="mt-4 max-w-xl text-sm leading-7 text-mist">Watch our 60-second introduction to WorldzPayments. Payments for your business, straight to your wallet.</p>
+      <div className="mt-7 overflow-hidden rounded-[24px] border border-line bg-ink shadow-[0_20px_70px_rgba(11,15,14,.12)]">
+        <video controls playsInline preload="metadata" poster="/media/worldzpayments-demo-poster.jpg" aria-label="WorldzPayments 60-second product demo" aria-describedby="demo-description" className="aspect-video w-full">
+          <source src="/media/worldzpayments-advert-60s.mp4" type="video/mp4" />
+          Your browser does not support embedded video. <a href="/media/worldzpayments-advert-60s.mp4">Open the demo video</a>.
+        </video>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-mist"><span className="inline-flex items-center gap-2"><Play size={13} aria-hidden="true" />60 seconds · Video with sound</span><a href="/media/worldzpayments-advert-60s.mp4" target="_blank" rel="noreferrer" className="underline underline-offset-4 hover:text-ink">Open video in a new tab</a></div>
+      <div className="mt-8 flex flex-wrap items-center gap-5"><Link href="/onboarding" className="inline-flex min-h-11 items-center gap-3 rounded-full bg-ink px-6 py-3 text-xs font-medium text-paper">Create your workspace<ArrowRight size={14} className="text-signal" /></Link><Link href="/docs" className="text-xs font-medium text-green-deep underline underline-offset-4">Read the product guide</Link></div>
+    </section>
+  </div></main>;
 }

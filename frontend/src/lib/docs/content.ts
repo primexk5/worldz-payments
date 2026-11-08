@@ -353,7 +353,7 @@ if (!response.ok) {
         "Test wallet rejection, insufficient gas, an expired link, a pending payment and token storage requirements. A failed status check must not trigger another payment.",
         "For live deployment, use HTTPS, secure session cookies, the correct public origin and an agreed support/reconciliation process.",
       ] },
-      { type: "links", items: [{ label: "Create a payment link", href: "/dashboard/links" }, { label: "Review service terms", href: "/terms" }, { label: "Try the demo", href: "/checkout/demo" }] },
+      { type: "links", items: [{ label: "Create a payment link", href: "/dashboard/links" }, { label: "Review service terms", href: "/terms" }, { label: "Watch the demo", href: "/checkout/demo" }] },
     ],
   },
 ];

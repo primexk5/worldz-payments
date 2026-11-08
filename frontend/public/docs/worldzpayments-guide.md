@@ -624,4 +624,4 @@ Validate the full journey before taking live payments.
 
 - [Create a payment link](https://YOUR_PLATFORM_ORIGIN/dashboard/links)
 - [Review service terms](https://YOUR_PLATFORM_ORIGIN/terms)
-- [Try the demo](https://YOUR_PLATFORM_ORIGIN/checkout/demo)
+- [Watch the demo](https://YOUR_PLATFORM_ORIGIN/checkout/demo)
