@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CreditCard, LayoutDashboard, Link2, LogOut, Menu, Settings, X, ChevronDown, CircleHelp, ArrowUpRight, ShieldCheck } from "lucide-react";
+import { BarChart3, CreditCard, LayoutDashboard, Link2, LogOut, Menu, Settings, X, CircleHelp, ShieldCheck, PanelLeftOpen, PanelLeftClose } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { NEAR_NETWORK_ID } from "@/lib/near/config";
@@ -28,6 +29,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -57,11 +59,21 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   };
 
   return <div className="workspace-theme min-h-screen bg-background text-foreground lg:flex">
-    <aside className="hidden w-[248px] shrink-0 flex-col border-r border-line bg-white lg:sticky lg:top-0 lg:flex lg:h-screen">
-      <div className="flex h-[88px] items-center px-6"><BrandMark /></div>
-      <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl border border-line bg-paper/50 p-3"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-ink text-sm font-semibold text-paper">{merchant?.displayName?.slice(0,1).toUpperCase() ?? "W"}</span><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{merchant?.displayName ?? "Your workspace"}</p><p className="mt-1 text-[10px] text-mist">Merchant account</p></div><ChevronDown size={14} className="text-mist"/></div><p className="px-6 pb-2 pt-7 font-mono text-[9px] uppercase tracking-[.15em] text-mist">WORKSPACE</p>
-      <nav className="space-y-1 px-4">{navigation.map(({ label, href, icon: Icon }) => <Link key={href} href={href} className={`flex items-center gap-3 rounded-lg px-3 py-3 text-[13px] transition ${activeNavigation?.href === href ? "bg-paper font-medium text-ink" : "text-ink/65 hover:bg-paper hover:text-ink"}`}><Icon size={17} />{label}</Link>)}</nav>
-      <div className="mt-auto p-4"><div className="mb-5 rounded-xl border border-line bg-paper/70 p-4"><CircleHelp size={19} className="text-ink"/><p className="mt-2 text-xs font-medium">A little help goes a long way.</p><p className="mt-1 text-[11px] leading-5 text-mist">Find answers and build your integration.</p><Link href="/docs" className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-ink">Explore the docs <ArrowUpRight size={13}/></Link></div><div className="border-t border-line pt-4"><p className="truncate text-xs font-medium">{merchant?.displayName ?? "Merchant"}</p><p className="mt-1 truncate font-mono text-[9px] text-mist">{merchant?.accountId ?? "Loading account…"}</p><button onClick={() => void signOut()} className="mt-4 flex items-center gap-2 text-xs text-mist transition hover:text-ink"><LogOut size={14} />Sign out</button></div></div>
+    <aside aria-label="Dashboard sidebar" className={`hidden shrink-0 flex-col items-center gap-5 px-3 pb-4 pt-5 transition-[width] duration-300 motion-reduce:transition-none lg:sticky lg:top-0 lg:flex lg:h-dvh ${sidebarExpanded ? "w-[240px]" : "w-[88px]"}`}>
+      <button type="button" onClick={() => setSidebarExpanded((expanded) => !expanded)} aria-label={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={sidebarExpanded} aria-controls="desktop-dashboard-navigation" title={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"} className="group flex h-12 w-full shrink-0 items-center justify-center gap-3 rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-green-deep">
+        <Image src="/brand/symbol-light.svg" alt="" width={40} height={40} unoptimized className="size-10 shrink-0" />
+        {sidebarExpanded && <><span className="min-w-0 flex-1 text-left text-sm font-semibold tracking-tight">worldzPayments</span><PanelLeftClose size={16} className="shrink-0 text-mist" /></>}
+      </button>
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center rounded-[32px] border border-line/50 bg-white px-2 py-2 shadow-[0_4px_20px_rgba(11,15,14,.025)]">
+        <nav id="desktop-dashboard-navigation" aria-label="Dashboard navigation" className="flex w-full flex-col items-center gap-2 overflow-y-auto">{navigation.filter(({href}) => href !== "/dashboard/settings").map(({ label, href, icon: Icon }) => <Link key={href} href={href} aria-label={label} title={!sidebarExpanded ? label : undefined} aria-current={activeNavigation?.href === href ? "page" : undefined} className={`flex min-h-11 shrink-0 items-center rounded-full transition-colors ${sidebarExpanded ? "w-full gap-3 px-4" : "w-11 justify-center"} ${activeNavigation?.href === href ? "bg-ink text-paper" : "text-ink/65 hover:bg-paper hover:text-ink"}`}><Icon size={18} strokeWidth={1.6} className="shrink-0" />{sidebarExpanded && <span className="whitespace-nowrap text-xs font-medium">{label}</span>}</Link>)}</nav>
+        <div className="mt-auto flex w-full flex-col items-center gap-2 pt-5">
+          <Link href="/docs" aria-label="Documentation and help" title={!sidebarExpanded ? "Documentation and help" : undefined} className={`flex min-h-11 items-center rounded-full text-ink/65 transition-colors hover:bg-paper hover:text-ink ${sidebarExpanded ? "w-full gap-3 px-4" : "w-11 justify-center"}`}><CircleHelp size={18} strokeWidth={1.6} className="shrink-0" />{sidebarExpanded && <span className="text-xs">Help & documentation</span>}</Link>
+          <Link href="/dashboard/settings" aria-label="Settings" title={!sidebarExpanded ? "Settings" : undefined} aria-current={activeNavigation?.href === "/dashboard/settings" ? "page" : undefined} className={`flex min-h-11 items-center rounded-full transition-colors ${sidebarExpanded ? "w-full gap-3 px-4" : "w-11 justify-center"} ${activeNavigation?.href === "/dashboard/settings" ? "bg-ink text-paper" : "text-ink/65 hover:bg-paper hover:text-ink"}`}><Settings size={18} strokeWidth={1.6} className="shrink-0" />{sidebarExpanded && <span className="text-xs">Settings</span>}</Link>
+          <button type="button" onClick={() => void signOut()} aria-label="Sign out" title={!sidebarExpanded ? "Sign out" : undefined} className={`flex min-h-11 items-center rounded-full text-ink/65 transition-colors hover:bg-paper hover:text-ink focus-visible:outline-2 focus-visible:outline-green-deep ${sidebarExpanded ? "w-full gap-3 px-4" : "w-11 justify-center"}`}><LogOut size={18} strokeWidth={1.6} className="shrink-0" />{sidebarExpanded && <span className="text-xs">Sign out</span>}</button>
+          <button type="button" onClick={() => setSidebarExpanded((expanded) => !expanded)} aria-label={sidebarExpanded ? "Collapse workspace details" : "Expand workspace details"} aria-expanded={sidebarExpanded} aria-controls="desktop-dashboard-navigation" title={!sidebarExpanded ? `${merchant?.displayName ?? "Your workspace"} · Click to expand` : "Collapse sidebar"} className={`mt-1 flex min-h-11 items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-deep ${sidebarExpanded ? "w-full gap-3 bg-paper px-2 py-2" : "w-11 justify-center"}`}><span className="grid size-10 shrink-0 place-items-center rounded-full bg-ink text-sm font-medium text-paper">{merchant?.displayName?.slice(0,1).toUpperCase() ?? "W"}</span>{sidebarExpanded && <span className="min-w-0 text-left"><span className="block truncate text-xs font-medium">{merchant?.displayName ?? "Your workspace"}</span><span className="mt-1 block truncate font-mono text-[9px] text-mist">{merchant?.accountId ?? "Merchant account"}</span></span>}</button>
+          <button type="button" onClick={() => setSidebarExpanded((expanded) => !expanded)} aria-label={sidebarExpanded ? "Collapse navigation" : "Expand navigation"} aria-expanded={sidebarExpanded} aria-controls="desktop-dashboard-navigation" title={sidebarExpanded ? "Collapse navigation" : "Expand navigation"} className="flex h-7 w-full shrink-0 items-center justify-center rounded-full text-mist hover:text-ink focus-visible:outline-2 focus-visible:outline-green-deep">{sidebarExpanded ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}</button>
+        </div>
+      </div>
     </aside>
     <div className="min-w-0 flex-1 pb-20 lg:pb-0">
       <header className="sticky top-0 z-30 flex h-[70px] items-center justify-between border-b border-line bg-white/95 px-4 backdrop-blur sm:px-7 lg:h-[76px] lg:px-10">
