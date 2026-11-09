@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, BadgeCheck, Check, CircleAlert, LoaderCircle, Smartphone, Zap } from "lucide-react";
 import { useNearWallet } from "@/components/providers/near-wallet-provider";
 import { nearApi, type VtpassPurchaseStatus } from "@/lib/near/api";
@@ -37,6 +37,7 @@ export default function NigeriaServicesPage() {
   const [variations, setVariations] = useState<Variation[]>([]);
   const [variationCode, setVariationCode] = useState("");
   const [tokens, setTokens] = useState<AllowedFungibleToken[]>([]);
+  const [assetError, setAssetError] = useState<string | null>(null);
   const [tokenContract, setTokenContract] = useState("native:NEAR");
   const [phone, setPhone] = useState("");
   const [customerNumber, setCustomerNumber] = useState("");
@@ -66,6 +67,22 @@ export default function NigeriaServicesPage() {
   const selectedVariation = useMemo(() => variations.find((variation) => variation.variation_code === variationCode) ?? null, [variations, variationCode]);
   const needsCustomerNumber = category === "electricity" || category === "tv";
   const purchaseAmount = category === "data" || category === "tv" ? selectedVariation?.variation_amount ?? "" : amountNgn;
+
+  const loadPaymentTokens = useCallback(async () => {
+    try {
+      const assets = await nearApi.allowedAssets();
+      const stable = assets.tokens.filter((token) => ["USDC", "USDT", "DAI"].includes(token.symbol.toUpperCase()));
+      setTokens(stable);
+      setAssetError(null);
+      setTokenContract((current) => current === "native:NEAR" || stable.some((token) => token.contractId === current)
+        ? current : "native:NEAR");
+      const missing = ["USDC", "USDT"].filter((symbol) => !stable.some((token) => token.symbol.toUpperCase() === symbol));
+      if (missing.length) setAssetError(`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not enabled or available on this testnet. Check the backend and router token allowlists.`);
+    } catch (cause) {
+      setTokens([]);
+      setAssetError(`Could not load USDC and USDT: ${providerError(cause)}`);
+    }
+  }, []);
 
   useEffect(() => {
     const raw = window.sessionStorage.getItem(CHECKOUT_KEY);
@@ -127,14 +144,10 @@ export default function NigeriaServicesPage() {
       setServices(available);
       setServiceId(available[0]?.serviceID ?? "");
     }).catch((cause) => { if (active) setError(providerError(cause)); }).finally(() => { if (active) setLoadingCatalog(false); });
-    void nearApi.allowedAssets().then((assets) => {
-      if (!active) return;
-      const stable = assets.tokens.filter((token) => ["USDC", "USDT", "DAI"].includes(token.symbol.toUpperCase()));
-      setTokens(stable);
-      setTokenContract((current) => current === "native:NEAR" || stable.some((token) => token.contractId === current) ? current : stable.find((token) => token.symbol.toUpperCase() === "USDC")?.contractId ?? stable[0]?.contractId ?? "native:NEAR");
-    }).catch(() => { if (active) setTokens([]); });
     return () => { active = false; };
   }, [category]);
+
+  useEffect(() => { void loadPaymentTokens(); }, [loadPaymentTokens]);
 
   useEffect(() => {
     if (!serviceId || (category !== "data" && category !== "tv")) return;
@@ -312,6 +325,7 @@ export default function NigeriaServicesPage() {
           {needsCustomerNumber && <div><label className="block text-xs font-medium">{category === "electricity" ? "Meter number" : "Smartcard / IUC number"}<input value={customerNumber} onChange={(event) => { setCustomerNumber(event.target.value); setVerifiedCustomer(null); setQuote(null); }} maxLength={80} className="mt-2 h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-ink/40" placeholder="Enter the account number"/></label><button type="button" disabled={busy || !customerNumber.trim() || !serviceId} onClick={() => void verifyCustomer()} className="mt-2 inline-flex min-h-10 items-center gap-2 rounded-full border border-line px-4 text-xs font-medium disabled:opacity-50">{busy ? <LoaderCircle size={13} className="animate-spin"/> : <BadgeCheck size={13}/>}Verify account with VTpass</button>{verifiedCustomer && <pre className="mt-3 max-h-28 overflow-auto rounded-xl bg-paper p-3 text-[10px] leading-4 text-mist">{JSON.stringify(verifiedCustomer.content ?? verifiedCustomer, null, 2)}</pre>}</div>}
           <label className="block text-xs font-medium">Contact phone number<input type="tel" autoComplete="tel" value={phone} onChange={(event) => { setPhone(event.target.value); setQuote(null); }} maxLength={20} className="mt-2 h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-ink/40" placeholder="080…"/></label>
           <label className="block text-xs font-medium">Payment asset<select value={tokenContract} onChange={(event) => { setTokenContract(event.target.value); setQuote(null); }} className="mt-2 h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-ink/40"><option value="native:NEAR">NEAR · native</option>{tokens.map((token) => <option key={token.contractId} value={token.contractId}>{token.symbol} · NEP-141</option>)}</select></label>
+          {assetError && <div role="status" className="rounded-xl border border-amber/40 bg-amber/10 p-3 text-xs text-amber-900">{assetError} <button type="button" onClick={() => { setAssetError(null); void loadPaymentTokens(); }} className="ml-1 font-medium underline">Retry loading tokens</button></div>}
           {error && <p role="alert" className="rounded-xl border border-alert/20 bg-alert/5 p-3 text-xs leading-5 text-alert">{error}</p>}
           {!quote ? <button onClick={() => void getQuote()} disabled={busy || loadingCatalog || !selectedToken} className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-white disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin"/> : <ArrowRight size={14}/>}Get a 10-minute quote</button> : <div className="rounded-2xl border border-green-deep/20 bg-green-deep/[.04] p-4"><div className="flex items-center justify-between gap-3"><span className="text-xs text-mist">VTpass sandbox price</span><span className="font-mono text-sm">₦{quote.amountNgn}</span></div><div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-mist">Locked quote</span><span className="font-mono text-lg font-semibold">${quote.amountUsd} USD</span></div><div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-mist">Wallet payment</span><span className="font-mono text-xs">{formatAssetAmount(quote.tokenAmountBaseUnits, quote.asset)}</span></div><p className="mt-3 text-[10px] leading-4 text-mist">₦{quote.exchangeRateNgnPerUsd}/USD · {quote.fxSource} updated {new Date(quote.fxSourceUpdatedAtSeconds * 1000).toLocaleString()}. {selectedToken?.symbol} price: ${quote.tokenUsdPrice} ({quote.tokenPriceSource}, updated {new Date(quote.tokenPriceUpdatedAtSeconds * 1000).toLocaleString()}). Quote expires {new Date(quote.expiresAtSeconds * 1000).toLocaleTimeString()}.</p><button onClick={() => accountId ? void continueToPayment() : void connect().catch((cause) => setError(providerError(cause)))} disabled={busy || connecting} className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-4 text-xs font-medium text-white disabled:opacity-50">{busy || connecting ? <LoaderCircle size={14} className="animate-spin"/> : <ArrowRight size={14}/>} {accountId ? "Review and pay here" : "Connect NEAR wallet"}</button></div>}
         </div>}

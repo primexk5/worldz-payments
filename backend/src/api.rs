@@ -116,7 +116,13 @@ async fn get_assets(
     let network = state.config.network(query.network_id);
     let mut tokens = Vec::new();
     for token_id in &network.ft_allowlist {
-        let metadata = near_rpc::ft_metadata(&state, query.network_id, token_id).await?;
+        let metadata = match near_rpc::ft_metadata(&state, query.network_id, token_id).await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                tracing::warn!(token_id, %error, "Could not load allowlisted token metadata; other assets remain available");
+                continue;
+            }
+        };
         let name = metadata
             .get("name")
             .and_then(Value::as_str)

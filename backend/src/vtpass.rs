@@ -20,10 +20,13 @@ const FX_SOURCE: &str = "open.er-api.com";
 const FX_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 const FX_MAX_AGE_SECONDS: i64 = 48 * 60 * 60;
 const NEAR_PRICE_URL: &str = "https://api.coingecko.com/api/v3/simple/price?ids=near&vs_currencies=usd&include_last_updated_at=true";
+const NEAR_PRICE_FALLBACK_URL: &str =
+    "https://api.coinpaprika.com/v1/tickers/near-near-protocol?quotes=USD";
 const NEAR_PRICE_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 const NEAR_PRICE_MAX_AGE_SECONDS: i64 = 30 * 60;
 const STABLE_USD_MICROS: u128 = 1_000_000;
 const NEAR_PRICE_SOURCE: &str = "api.coingecko.com";
+const NEAR_PRICE_FALLBACK_SOURCE: &str = "api.coinpaprika.com";
 
 fn configured(state: &AppState) -> Result<(&str, &str, &str), ApiError> {
     let config = &state.config;
@@ -249,28 +252,49 @@ async fn near_usd_rate(state: &AppState) -> Result<crate::state::CachedNearUsdRa
     {
         return Ok(rate.clone());
     }
+    let rate = match fetch_near_usd_price(state, NEAR_PRICE_URL, NEAR_PRICE_SOURCE).await {
+        Ok(payload) => parse_near_usd_rate(&payload, Utc::now().timestamp()),
+        Err(error) => Err(error),
+    };
+    let rate = match rate {
+        Ok(rate) => rate,
+        Err(error) => {
+            tracing::warn!(%error, "CoinGecko NEAR/USD price unavailable; trying CoinPaprika");
+            let payload =
+                fetch_near_usd_price(state, NEAR_PRICE_FALLBACK_URL, NEAR_PRICE_FALLBACK_SOURCE)
+                    .await?;
+            parse_coinpaprika_near_usd_rate(&payload, Utc::now().timestamp())?
+        }
+    };
+    *cached = Some(rate.clone());
+    Ok(rate)
+}
+
+async fn fetch_near_usd_price(
+    state: &AppState,
+    url: &str,
+    source: &str,
+) -> Result<Value, ApiError> {
     let response = state
         .http
-        .get(NEAR_PRICE_URL)
+        .get(url)
+        .timeout(std::time::Duration::from_secs(8))
         .send()
         .await
         .map_err(|error| {
-            tracing::warn!(%error, "NEAR/USD price fetch failed");
+            tracing::warn!(source, %error, "NEAR/USD price fetch failed");
             ApiError::unavailable("Live NEAR/USD pricing is temporarily unavailable.")
         })?;
     if !response.status().is_success() {
-        tracing::warn!(status = %response.status(), "NEAR/USD price source rejected the request");
+        tracing::warn!(source, status = %response.status(), "NEAR/USD price source rejected the request");
         return Err(ApiError::unavailable(
             "Live NEAR/USD pricing is temporarily unavailable.",
         ));
     }
-    let payload = response.json::<Value>().await.map_err(|error| {
-        tracing::warn!(%error, "NEAR/USD price source returned invalid JSON");
+    response.json::<Value>().await.map_err(|error| {
+        tracing::warn!(source, %error, "NEAR/USD price source returned invalid JSON");
         ApiError::unavailable("Live NEAR/USD pricing returned an invalid response.")
-    })?;
-    let rate = parse_near_usd_rate(&payload, Utc::now().timestamp())?;
-    *cached = Some(rate.clone());
-    Ok(rate)
+    })
 }
 
 fn parse_near_usd_rate(
@@ -304,6 +328,49 @@ fn parse_near_usd_rate(
         price_micros,
         price_display: format_micros(price_micros),
         source_updated_at_seconds: updated_at,
+        source: NEAR_PRICE_SOURCE,
+        fetched_at: std::time::Instant::now(),
+    })
+}
+
+fn parse_coinpaprika_near_usd_rate(
+    payload: &Value,
+    now_seconds: i64,
+) -> Result<crate::state::CachedNearUsdRate, ApiError> {
+    if payload.get("id").and_then(Value::as_str) != Some("near-near-protocol")
+        || payload.get("symbol").and_then(Value::as_str) != Some("NEAR")
+    {
+        return Err(ApiError::unavailable(
+            "NEAR/USD fallback returned a different asset.",
+        ));
+    }
+    let updated_at = payload
+        .get("last_updated")
+        .and_then(Value::as_str)
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp())
+        .ok_or_else(|| ApiError::unavailable("NEAR/USD fallback has no update time."))?;
+    if updated_at > now_seconds + 300
+        || now_seconds.saturating_sub(updated_at) > NEAR_PRICE_MAX_AGE_SECONDS
+    {
+        return Err(ApiError::unavailable("NEAR/USD fallback price is stale."));
+    }
+    let price = payload
+        .pointer("/quotes/USD/price")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value > 0.0 && *value <= 1_000_000.0)
+        .ok_or_else(|| ApiError::unavailable("NEAR/USD fallback returned an invalid price."))?;
+    let price_micros = (price * 1_000_000.0).round() as u128;
+    if price_micros == 0 {
+        return Err(ApiError::unavailable(
+            "NEAR/USD fallback price is outside supported precision.",
+        ));
+    }
+    Ok(crate::state::CachedNearUsdRate {
+        price_micros,
+        price_display: format_micros(price_micros),
+        source_updated_at_seconds: updated_at,
+        source: NEAR_PRICE_FALLBACK_SOURCE,
         fetched_at: std::time::Instant::now(),
     })
 }
@@ -318,7 +385,7 @@ async fn token_usd_price(
             Ok((
                 price.price_micros,
                 price.price_display,
-                NEAR_PRICE_SOURCE.to_owned(),
+                price.source.to_owned(),
                 price.source_updated_at_seconds,
             ))
         }
@@ -941,9 +1008,10 @@ async fn update_from_provider(
 mod tests {
     use super::{
         format_micros, format_ngn_minor, new_request_id, ngn_minor_to_usd_micros,
-        parse_near_usd_rate, parse_ngn_minor, parse_usd_ngn_rate, provider_state,
-        usd_to_token_base_units, validate_service_id, STABLE_USD_MICROS,
+        parse_coinpaprika_near_usd_rate, parse_near_usd_rate, parse_ngn_minor, parse_usd_ngn_rate,
+        provider_state, usd_to_token_base_units, validate_service_id, STABLE_USD_MICROS,
     };
+    use chrono::{TimeZone, Utc};
     use serde_json::json;
 
     #[test]
@@ -1025,5 +1093,26 @@ mod tests {
         assert_eq!(price.price_micros, 5_250_000);
         assert_eq!(price.price_display, "5.25");
         assert!(parse_near_usd_rate(&payload, now + 31 * 60).is_err());
+    }
+
+    #[test]
+    fn fallback_near_price_is_bound_to_near_and_a_fresh_timestamp() {
+        let now = 1_800_000_000;
+        let timestamp = Utc
+            .timestamp_opt(now - 30, 0)
+            .single()
+            .unwrap()
+            .to_rfc3339();
+        let payload = json!({
+            "id": "near-near-protocol", "symbol": "NEAR", "last_updated": timestamp,
+            "quotes": { "USD": { "price": 5.251234 } }
+        });
+        let rate = parse_coinpaprika_near_usd_rate(&payload, now).unwrap();
+        assert_eq!(rate.price_micros, 5_251_234);
+        assert_eq!(rate.source, "api.coinpaprika.com");
+        assert!(parse_coinpaprika_near_usd_rate(&payload, now + 31 * 60).is_err());
+        let mut unrelated = payload;
+        unrelated["id"] = json!("other-token");
+        assert!(parse_coinpaprika_near_usd_rate(&unrelated, now).is_err());
     }
 }

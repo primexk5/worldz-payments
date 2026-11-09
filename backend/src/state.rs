@@ -19,6 +19,7 @@ pub struct CachedNearUsdRate {
     pub price_micros: u128,
     pub price_display: String,
     pub source_updated_at_seconds: i64,
+    pub source: &'static str,
     pub fetched_at: Instant,
 }
 
