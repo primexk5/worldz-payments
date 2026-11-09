@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
+use worldz_near_protocol::NetworkId;
 
 use crate::{auth, db::sqlx, error::ApiError, models::AssetDto, state::AppState};
 
@@ -18,6 +19,11 @@ const FX_RATE_URL: &str = "https://open.er-api.com/v6/latest/USD";
 const FX_SOURCE: &str = "open.er-api.com";
 const FX_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 const FX_MAX_AGE_SECONDS: i64 = 48 * 60 * 60;
+const NEAR_PRICE_URL: &str = "https://api.coingecko.com/api/v3/simple/price?ids=near&vs_currencies=usd&include_last_updated_at=true";
+const NEAR_PRICE_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+const NEAR_PRICE_MAX_AGE_SECONDS: i64 = 30 * 60;
+const STABLE_USD_MICROS: u128 = 1_000_000;
+const NEAR_PRICE_SOURCE: &str = "api.coingecko.com";
 
 fn configured(state: &AppState) -> Result<(&str, &str, &str), ApiError> {
     let config = &state.config;
@@ -139,7 +145,7 @@ pub async fn variations(
 #[serde(rename_all = "camelCase")]
 pub struct QuoteRequest {
     amount_ngn: String,
-    token_decimals: u8,
+    asset: AssetDto,
 }
 
 pub async fn quote(
@@ -148,14 +154,17 @@ pub async fn quote(
 ) -> Result<Json<Value>, ApiError> {
     configured(&state)?;
     let amount_ngn = parse_ngn_minor(&input.amount_ngn)?;
-    if amount_ngn == 0 || amount_ngn > 100_000_000 || input.token_decimals > 24 {
-        return Err(ApiError::bad_request(
-            "Amount or token precision is outside supported limits.",
-        ));
+    if amount_ngn == 0 || amount_ngn > 100_000_000 {
+        return Err(ApiError::bad_request("Amount is outside supported limits."));
     }
     let fx = usd_ngn_rate(&state).await?;
     let usd_micros = ngn_minor_to_usd_micros(amount_ngn, fx.rate_micros)?;
-    let token_amount = token_base_units(usd_micros, input.token_decimals)?;
+    let (token_usd_micros, token_usd_display, token_price_source, token_price_updated_at) =
+        token_usd_price(&state, &input.asset).await?;
+    let token_decimals = match &input.asset {
+        AssetDto::Native { decimals, .. } | AssetDto::Nep141 { decimals, .. } => *decimals,
+    };
+    let token_amount = usd_to_token_base_units(usd_micros, token_decimals, token_usd_micros)?;
     if usd_micros == 0 || token_amount == 0 {
         return Err(ApiError::bad_request(
             "This NGN amount is too small for the selected token precision.",
@@ -173,23 +182,30 @@ pub async fn quote(
     sqlx::query("DELETE FROM vtpass_fx_quotes WHERE consumed_at IS NULL AND expires_at < now() - INTERVAL '1 day'")
         .execute(&state.pool)
         .await?;
-    sqlx::query("INSERT INTO vtpass_fx_quotes (quote_id,amount_ngn,amount_usd,rate_ngn_per_usd,token_decimals,token_amount_base_units,fx_source,fx_source_updated_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)")
+    sqlx::query("INSERT INTO vtpass_fx_quotes (quote_id,amount_ngn,amount_usd,rate_ngn_per_usd,token_decimals,token_amount_base_units,fx_source,fx_source_updated_at,expires_at,payment_asset,token_usd_price,token_price_source,token_price_updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&quote_id)
         .bind(&amount_ngn_display)
         .bind(&amount_usd_display)
         .bind(&fx.rate_display)
-        .bind(i16::from(input.token_decimals))
+        .bind(i16::from(token_decimals))
         .bind(&token_amount)
         .bind(FX_SOURCE)
         .bind(source_updated_at)
         .bind(expires_at)
+        .bind(serde_json::to_value(&input.asset).map_err(|_| ApiError::internal())?)
+        .bind(&token_usd_display)
+        .bind(&token_price_source)
+        .bind(Utc.timestamp_opt(token_price_updated_at, 0).single().ok_or_else(ApiError::internal)?)
         .execute(&state.pool)
         .await?;
     Ok(Json(json!({
         "quoteId": quote_id,
         "amountNgn": amount_ngn_display,
         "amountUsd": amount_usd_display,
-        "tokenDecimals": input.token_decimals,
+        "asset": input.asset,
+        "tokenUsdPrice": token_usd_display,
+        "tokenPriceSource": token_price_source,
+        "tokenPriceUpdatedAtSeconds": token_price_updated_at,
         "tokenAmountBaseUnits": token_amount,
         "exchangeRateNgnPerUsd": fx.rate_display,
         "fxSource": FX_SOURCE,
@@ -223,6 +239,134 @@ async fn usd_ngn_rate(state: &AppState) -> Result<crate::state::CachedUsdNgnRate
     let rate = parse_usd_ngn_rate(&payload, Utc::now().timestamp())?;
     *cached = Some(rate.clone());
     Ok(rate)
+}
+
+async fn near_usd_rate(state: &AppState) -> Result<crate::state::CachedNearUsdRate, ApiError> {
+    let mut cached = state.near_usd_rate.lock().await;
+    if let Some(rate) = cached
+        .as_ref()
+        .filter(|rate| rate.fetched_at.elapsed() < NEAR_PRICE_CACHE_TTL)
+    {
+        return Ok(rate.clone());
+    }
+    let response = state
+        .http
+        .get(NEAR_PRICE_URL)
+        .send()
+        .await
+        .map_err(|error| {
+            tracing::warn!(%error, "NEAR/USD price fetch failed");
+            ApiError::unavailable("Live NEAR/USD pricing is temporarily unavailable.")
+        })?;
+    if !response.status().is_success() {
+        tracing::warn!(status = %response.status(), "NEAR/USD price source rejected the request");
+        return Err(ApiError::unavailable(
+            "Live NEAR/USD pricing is temporarily unavailable.",
+        ));
+    }
+    let payload = response.json::<Value>().await.map_err(|error| {
+        tracing::warn!(%error, "NEAR/USD price source returned invalid JSON");
+        ApiError::unavailable("Live NEAR/USD pricing returned an invalid response.")
+    })?;
+    let rate = parse_near_usd_rate(&payload, Utc::now().timestamp())?;
+    *cached = Some(rate.clone());
+    Ok(rate)
+}
+
+fn parse_near_usd_rate(
+    payload: &Value,
+    now_seconds: i64,
+) -> Result<crate::state::CachedNearUsdRate, ApiError> {
+    let updated_at = payload
+        .pointer("/near/last_updated_at")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| ApiError::unavailable("Live NEAR/USD source has no update time."))?;
+    if updated_at > now_seconds + 300
+        || now_seconds.saturating_sub(updated_at) > NEAR_PRICE_MAX_AGE_SECONDS
+    {
+        return Err(ApiError::unavailable(
+            "Live NEAR/USD pricing source is stale. Try again when its price feed is current.",
+        ));
+    }
+    let price = payload
+        .pointer("/near/usd")
+        .and_then(Value::as_f64)
+        .filter(|price| price.is_finite() && *price > 0.0 && *price <= 1_000_000.0)
+        .ok_or_else(|| ApiError::unavailable("Live NEAR/USD source has no valid price."))?;
+    let price_micros_float = (price * 1_000_000.0).round();
+    if !price_micros_float.is_finite() || price_micros_float < 1.0 {
+        return Err(ApiError::unavailable(
+            "NEAR/USD price is outside supported precision.",
+        ));
+    }
+    let price_micros = price_micros_float as u128;
+    Ok(crate::state::CachedNearUsdRate {
+        price_micros,
+        price_display: format_micros(price_micros),
+        source_updated_at_seconds: updated_at,
+        fetched_at: std::time::Instant::now(),
+    })
+}
+
+async fn token_usd_price(
+    state: &AppState,
+    asset: &AssetDto,
+) -> Result<(u128, String, String, i64), ApiError> {
+    match asset {
+        AssetDto::Native { symbol, decimals } if symbol == "NEAR" && *decimals == 24 => {
+            let price = near_usd_rate(state).await?;
+            Ok((
+                price.price_micros,
+                price.price_display,
+                NEAR_PRICE_SOURCE.to_owned(),
+                price.source_updated_at_seconds,
+            ))
+        }
+        AssetDto::Nep141 {
+            contract_id,
+            symbol,
+            decimals,
+        } => {
+            let network = state.config.network(NetworkId::Testnet);
+            if !network
+                .ft_allowlist
+                .iter()
+                .any(|allowed| allowed == contract_id)
+            {
+                return Err(ApiError::bad_request(
+                    "This fungible token is not enabled for NEAR testnet checkout.",
+                ));
+            }
+            let metadata =
+                crate::near_rpc::ft_metadata(state, NetworkId::Testnet, contract_id).await?;
+            let actual_symbol = metadata.get("symbol").and_then(Value::as_str);
+            let actual_decimals = metadata.get("decimals").and_then(Value::as_u64);
+            if actual_symbol != Some(symbol.as_str())
+                || actual_decimals != Some(u64::from(*decimals))
+            {
+                return Err(ApiError::bad_request(
+                    "Token metadata changed. Refresh the supported asset list and request a new quote.",
+                ));
+            }
+            if !matches!(
+                symbol.to_ascii_uppercase().as_str(),
+                "USDC" | "USDT" | "DAI"
+            ) {
+                return Err(ApiError::bad_request(
+                    "VTpass sandbox checkout supports NEAR, USDC, USDT, or DAI.",
+                ));
+            }
+            Ok((
+                STABLE_USD_MICROS,
+                "1".to_owned(),
+                "USD stablecoin 1:1 testnet assumption".to_owned(),
+                Utc::now().timestamp(),
+            ))
+        }
+        _ => Err(ApiError::bad_request(
+            "VTpass sandbox checkout supports native NEAR or enabled USD stable tokens.",
+        )),
+    }
 }
 
 fn parse_usd_ngn_rate(
@@ -266,14 +410,15 @@ fn parse_usd_ngn_rate(
     })
 }
 
-fn token_base_units(usd_micros: u128, decimals: u8) -> Result<u128, ApiError> {
-    if decimals >= 6 {
-        usd_micros
-            .checked_mul(10u128.pow(u32::from(decimals - 6)))
-            .ok_or_else(ApiError::internal)
-    } else {
-        Ok(usd_micros / 10u128.pow(u32::from(6 - decimals)))
-    }
+fn usd_to_token_base_units(
+    usd_micros: u128,
+    decimals: u8,
+    usd_per_token_micros: u128,
+) -> Result<u128, ApiError> {
+    usd_micros
+        .checked_mul(10u128.pow(u32::from(decimals)))
+        .ok_or_else(ApiError::internal)
+        .map(|amount| amount / usd_per_token_micros)
 }
 
 fn ngn_minor_to_usd_micros(amount_minor: u64, rate_micros: u128) -> Result<u128, ApiError> {
@@ -345,7 +490,18 @@ pub async fn verify_customer(
     if let Some(kind) = input.customer_type.filter(|value| !value.trim().is_empty()) {
         body["type"] = json!(kind.trim());
     }
-    Ok(Json(post(&state, "/merchant-verify", &body).await?))
+    let verification = post(&state, "/merchant-verify", &body).await?;
+    if verification.get("code").and_then(Value::as_str) != Some("000")
+        || verification
+            .pointer("/content/WrongBillersCode")
+            .and_then(Value::as_bool)
+            == Some(true)
+    {
+        return Err(ApiError::bad_request(
+            "VTpass could not verify this meter or subscriber number.",
+        ));
+    }
+    Ok(Json(verification))
 }
 
 fn validate_service_id(service_id: &str) -> Result<(), ApiError> {
@@ -481,24 +637,33 @@ pub async fn create_purchase(
             "VTpass integration is restricted to NEAR testnet.",
         ));
     }
+    let asset_json: Value = link.try_get("asset")?;
     let asset: AssetDto =
-        serde_json::from_value(link.try_get("asset")?).map_err(|_| ApiError::internal())?;
-    let AssetDto::Nep141 {
-        symbol, decimals, ..
-    } = asset
-    else {
-        return Err(ApiError::bad_request(
-            "VTpass sandbox checkout currently requires a stable fungible token.",
-        ));
+        serde_json::from_value(asset_json.clone()).map_err(|_| ApiError::internal())?;
+    let decimals = match &asset {
+        AssetDto::Native { symbol, decimals } if symbol == "NEAR" && *decimals == 24 => *decimals,
+        AssetDto::Nep141 {
+            contract_id,
+            symbol,
+            decimals,
+        } if matches!(
+            symbol.to_ascii_uppercase().as_str(),
+            "USDC" | "USDT" | "DAI"
+        ) && state
+            .config
+            .network(NetworkId::Testnet)
+            .ft_allowlist
+            .iter()
+            .any(|allowed| allowed == contract_id) =>
+        {
+            *decimals
+        }
+        _ => {
+            return Err(ApiError::bad_request(
+                "VTpass sandbox checkout supports NEAR or enabled USD stable tokens.",
+            ));
+        }
     };
-    if !matches!(
-        symbol.to_ascii_uppercase().as_str(),
-        "USDC" | "USDT" | "DAI"
-    ) {
-        return Err(ApiError::bad_request(
-            "VTpass sandbox checkout supports USDC, USDT, or DAI only.",
-        ));
-    }
     let key = state
         .config
         .vtpass_data_encryption_key
@@ -522,7 +687,9 @@ pub async fn create_purchase(
     let quote_expires_at: chrono::DateTime<Utc> = quote.try_get("expires_at")?;
     let quote_decimals: i16 = quote.try_get("token_decimals")?;
     let quote_token_amount: String = quote.try_get("token_amount_base_units")?;
+    let quote_asset: Value = quote.try_get("payment_asset")?;
     if quote_decimals != i16::from(decimals)
+        || quote_asset != asset_json
         || link.try_get::<String, _>("amount")? != quote_token_amount
     {
         return Err(ApiError::bad_request(
@@ -562,17 +729,21 @@ pub async fn create_purchase(
     let rate_ngn_per_usd: String = quote.try_get("rate_ngn_per_usd")?;
     let fx_source: String = quote.try_get("fx_source")?;
     let fx_source_updated_at: chrono::DateTime<Utc> = quote.try_get("fx_source_updated_at")?;
+    let token_usd_price: String = quote.try_get("token_usd_price")?;
+    let token_price_source: String = quote.try_get("token_price_source")?;
+    let token_price_updated_at: chrono::DateTime<Utc> = quote.try_get("token_price_updated_at")?;
     sqlx::query(
         "UPDATE vtpass_fx_quotes SET consumed_at=now() WHERE quote_id=? AND consumed_at IS NULL",
     )
     .bind(&input.quote_id)
     .execute(&mut *tx)
     .await?;
-    sqlx::query("INSERT INTO vtpass_service_purchases (purchase_id,merchant_id,link_slug,category,service_id,variation_code,amount_ngn,amount_usd,quote_expires_at,recipient_ciphertext,recipient_nonce,quote_id,rate_ngn_per_usd,fx_source,fx_source_updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    sqlx::query("INSERT INTO vtpass_service_purchases (purchase_id,merchant_id,link_slug,category,service_id,variation_code,amount_ngn,amount_usd,quote_expires_at,recipient_ciphertext,recipient_nonce,quote_id,rate_ngn_per_usd,fx_source,fx_source_updated_at,token_usd_price,token_price_source,token_price_updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&purchase_id).bind(&merchant.merchant_id).bind(&input.link_slug).bind(&input.category)
         .bind(&input.service_id).bind(&input.variation_code).bind(&amount_ngn).bind(&amount_usd)
         .bind(quote_expires_at).bind(ciphertext).bind(nonce_bytes.as_slice()).bind(&input.quote_id)
-        .bind(rate_ngn_per_usd).bind(fx_source).bind(fx_source_updated_at).execute(&mut *tx).await?;
+        .bind(rate_ngn_per_usd).bind(fx_source).bind(fx_source_updated_at).bind(token_usd_price)
+        .bind(token_price_source).bind(token_price_updated_at).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(Json(json!({
         "purchaseId": purchase_id,
@@ -726,8 +897,10 @@ fn provider_state(response: &Value) -> &'static str {
         "FULFILLED"
     } else if status.eq_ignore_ascii_case("pending") || status.eq_ignore_ascii_case("processing") {
         "SUBMITTED"
-    } else {
+    } else if status.eq_ignore_ascii_case("failed") || status.eq_ignore_ascii_case("reversed") {
         "FAILED"
+    } else {
+        "RECONCILIATION_REQUIRED"
     }
 }
 
@@ -767,8 +940,9 @@ async fn update_from_provider(
 #[cfg(test)]
 mod tests {
     use super::{
-        format_micros, format_ngn_minor, new_request_id, ngn_minor_to_usd_micros, parse_ngn_minor,
-        parse_usd_ngn_rate, provider_state, validate_service_id,
+        format_micros, format_ngn_minor, new_request_id, ngn_minor_to_usd_micros,
+        parse_near_usd_rate, parse_ngn_minor, parse_usd_ngn_rate, provider_state,
+        usd_to_token_base_units, validate_service_id, STABLE_USD_MICROS,
     };
     use serde_json::json;
 
@@ -810,6 +984,10 @@ mod tests {
             provider_state(&json!({"content":{"transactions":{"status":"failed"}}})),
             "FAILED"
         );
+        assert_eq!(
+            provider_state(&json!({"code":"099","response_description":"PENDING"})),
+            "RECONCILIATION_REQUIRED"
+        );
     }
 
     #[test]
@@ -825,5 +1003,27 @@ mod tests {
         assert_eq!(rate.rate_display, "1525.75");
         assert!(parse_usd_ngn_rate(&payload, now + 49 * 60 * 60).is_err());
         assert!(parse_usd_ngn_rate(&json!({"result":"error"}), now).is_err());
+    }
+
+    #[test]
+    fn wallet_quotes_convert_usd_to_near_and_stable_token_units() {
+        assert_eq!(
+            usd_to_token_base_units(1_000_000, 24, 5_000_000).unwrap(),
+            200_000_000_000_000_000_000_000
+        );
+        assert_eq!(
+            usd_to_token_base_units(1_000_000, 6, STABLE_USD_MICROS).unwrap(),
+            1_000_000
+        );
+    }
+
+    #[test]
+    fn live_near_price_must_be_valid_and_recent() {
+        let now = 1_800_000_000;
+        let payload = json!({ "near": { "usd": 5.25, "last_updated_at": now - 30 } });
+        let price = parse_near_usd_rate(&payload, now).unwrap();
+        assert_eq!(price.price_micros, 5_250_000);
+        assert_eq!(price.price_display, "5.25");
+        assert!(parse_near_usd_rate(&payload, now + 31 * 60).is_err());
     }
 }

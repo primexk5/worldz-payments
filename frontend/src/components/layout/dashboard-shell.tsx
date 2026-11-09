@@ -16,7 +16,7 @@ import type { MerchantProfile } from "@/lib/near/types";
 const navigation = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Payment links", href: "/dashboard/links", icon: Link2 },
-  { label: "Nigeria services", href: "/dashboard/services", icon: Smartphone },
+  { label: "Subscriptions", href: "/dashboard/services", icon: Smartphone },
   { label: "Payments", href: "/dashboard/payments", icon: CreditCard },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },

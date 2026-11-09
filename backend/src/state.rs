@@ -15,6 +15,14 @@ pub struct CachedUsdNgnRate {
 }
 
 #[derive(Clone)]
+pub struct CachedNearUsdRate {
+    pub price_micros: u128,
+    pub price_display: String,
+    pub source_updated_at_seconds: i64,
+    pub fetched_at: Instant,
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
     pub config: Arc<AppConfig>,
@@ -22,6 +30,7 @@ pub struct AppState {
     pub request_budget: Arc<crate::abuse::RequestBudget>,
     pub public_requests: Arc<tokio::sync::Semaphore>,
     pub usd_ngn_rate: Arc<tokio::sync::Mutex<Option<CachedUsdNgnRate>>>,
+    pub near_usd_rate: Arc<tokio::sync::Mutex<Option<CachedNearUsdRate>>>,
 }
 
 impl AppState {
@@ -32,6 +41,7 @@ impl AppState {
             request_budget: Arc::new(crate::abuse::RequestBudget::default()),
             public_requests: Arc::new(tokio::sync::Semaphore::new(32)),
             usd_ngn_rate: Arc::new(tokio::sync::Mutex::new(None)),
+            near_usd_rate: Arc::new(tokio::sync::Mutex::new(None)),
             http: Client::builder()
                 .timeout(std::time::Duration::from_secs(12))
                 .user_agent("WorldzPayments-NEAR-API/1.0")

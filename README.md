@@ -18,7 +18,7 @@ WorldzPayments is a NEAR payment platform for merchants and their customers. It 
 
 The default configuration targets **NEAR testnet**. Mainnet requires its own contracts, accounts, signer configuration, and supported-token setup. The Shopify integration is a product-page checkout bridge, not a payment method inside Shopify’s native checkout.
 
-The dashboard also includes a **VTpass Nigeria sandbox** purchase flow for airtime, data, electricity, and one-time TV subscriptions. It only calls VTpass after a NEAR testnet order has verified settlement. The VTpass host is pinned to `sandbox.vtpass.com`; this demo does not convert test tokens into NGN or deliver real services.
+The dashboard includes **Subscription services** for Nigeria VTpass sandbox airtime, data, electricity, and one-time TV purchases; more countries are coming soon. Buyers can approve a NEAR testnet payment in native NEAR or an enabled USD stable token. The checkout and service receipt appear on the same page. It only calls VTpass after a NEAR testnet order has verified settlement. The VTpass host is pinned to `sandbox.vtpass.com`; this demo does not convert test tokens into NGN or deliver real services.
 
 ## How a payment works
 
@@ -94,7 +94,7 @@ cargo run -p worldz-near-api --bin generate_testnet_signer
 
 Register the matching **public key** on the router using its admin account. The API and router must agree on the signer key ID, public key, network, and contract account. Keep existing signing seeds stable across deployments.
 
-For the VTpass flow, register at the [VTpass sandbox](https://sandbox.vtpass.com/register), create its API keys under **Account Settings → API Keys**, and set the four `VTPASS_*` credentials/encryption values in `backend/.env`. Use sandbox keys only. Quotes fetch the latest daily-updated USD-base/NGN reference rate from [open.er-api.com](https://open.er-api.com/v6/latest/USD), cache it in memory for 15 minutes, reject source data older than 48 hours, and persist the selected rate in the 10-minute quote so checkout uses the same price. This is a reference FX quote; the hackathon flow does not execute a crypto-to-fiat conversion. The service checkout is at `/dashboard/services` and requires a signed-in workspace, an enabled NEAR testnet fungible stable token, and a testnet wallet.
+For the VTpass flow, register at the [VTpass sandbox](https://sandbox.vtpass.com/register), create its API keys under **Account Settings → API Keys**, and set the four `VTPASS_*` credentials/encryption values in `backend/.env`. Use sandbox keys only. Quotes fetch the latest daily-updated USD-base/NGN reference rate from [open.er-api.com](https://open.er-api.com/v6/latest/USD), and native NEAR quotes fetch a live NEAR/USD reference price from [CoinGecko](https://www.coingecko.com/en/coins/near). Both prices are stored with the 10-minute quote; unavailable or stale pricing stops new quotes. USD stable test tokens use a 1:1 USD assumption, not an actual swap. The hackathon flow does not execute a crypto-to-fiat conversion. The service checkout is at `/dashboard/services` and requires a signed-in workspace and a NEAR testnet wallet.
 
 Start the API from the repository root:
 

@@ -8,6 +8,14 @@ test("native NEAR conversion preserves all 24 decimal places", () => {
   assert.equal(formatUnitsExact("1000000000000000000000001", 24), "1.000000000000000000000001");
 });
 
+test("service checkout displays the quoted token amount rather than its USD value", () => {
+  const quotedNearBaseUnits = "200000000000000000000000"; // $1 at $5 per NEAR
+  const amountDisplay = formatUnitsExact(quotedNearBaseUnits, 24);
+  assert.equal(amountDisplay, "0.2");
+  assert.equal(parseUnitsExact(amountDisplay, 24).toString(), quotedNearBaseUnits);
+  assert.notEqual(amountDisplay, "1");
+});
+
 test("NEP-141 conversion uses the metadata precision", () => {
   assert.equal(parseUnitsExact("24.125", 6).toString(), "24125000");
   assert.equal(formatUnitsExact("24125000", 6), "24.125");

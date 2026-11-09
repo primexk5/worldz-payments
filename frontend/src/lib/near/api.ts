@@ -2,6 +2,7 @@ import { NEAR_NETWORK_ID } from "./config";
 import type {
   ApiError,
   AllowedFungibleToken,
+  NearAsset,
   AuthChallenge,
   AuthSession,
   DashboardDelivery,
@@ -107,8 +108,8 @@ export const nearApi = {
   vtpassVariations(serviceId: string) {
     return request<{ content?: { variations?: { variation_code: string; name: string; variation_amount: string; fixedPrice?: string }[] } }>(`/vtpass/variations?serviceId=${encodeURIComponent(serviceId)}`);
   },
-  vtpassQuote(input: { amountNgn: string; tokenDecimals: number }) {
-    return request<{ quoteId: string; amountNgn: string; amountUsd: string; tokenDecimals: number; tokenAmountBaseUnits: string; exchangeRateNgnPerUsd: string; fxSource: string; fxSourceUpdatedAtSeconds: number; expiresAtSeconds: number }>("/vtpass/quote", { method: "POST", body: body(input) });
+  vtpassQuote(input: { amountNgn: string; asset: NearAsset }) {
+    return request<{ quoteId: string; amountNgn: string; amountUsd: string; asset: NearAsset; tokenAmountBaseUnits: string; exchangeRateNgnPerUsd: string; fxSource: string; fxSourceUpdatedAtSeconds: number; tokenUsdPrice: string; tokenPriceSource: string; tokenPriceUpdatedAtSeconds: number; expiresAtSeconds: number }>("/vtpass/quote", { method: "POST", body: body(input) });
   },
   vtpassVerify(input: { serviceID: string; billersCode: string; type?: string }) {
     return request<Record<string, unknown>>("/vtpass/verify", { method: "POST", body: body(input) });
