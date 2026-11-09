@@ -75,13 +75,7 @@ impl AppConfig {
             session_cookie_name: value("SESSION_COOKIE_NAME", "worldz_session"),
             session_ttl_hours: parse("SESSION_TTL_HOURS", 168i64)?,
             session_cookie_secure: parse("SESSION_COOKIE_SECURE", true)?,
-            cors_origins: optional("CORS_ORIGINS")
-                .unwrap_or_default()
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect(),
+            cors_origins: parse_cors_origins(&optional("CORS_ORIGINS").unwrap_or_default()),
             webhook_signing_secret: env::var("WEBHOOK_SIGNING_SECRET")
                 .ok()
                 .filter(|secret| !secret.is_empty()),
@@ -106,9 +100,6 @@ impl AppConfig {
             testnet,
             mainnet,
         };
-        for origin in &config.cors_origins {
-            validate_cors_origin(origin)?;
-        }
         if config.auth_challenge_ttl_seconds <= 0 || config.auth_challenge_ttl_seconds > 900 {
             return Err(ApiError::configuration(
                 "AUTH_CHALLENGE_TTL_SECONDS must be between 1 and 900",
@@ -181,44 +172,100 @@ impl AppConfig {
     }
 }
 
-fn validate_cors_origin(origin: &str) -> Result<(), ApiError> {
+fn normalize_cors_origin(origin: &str) -> Result<String, ApiError> {
     let url = url::Url::parse(origin)
         .map_err(|_| ApiError::configuration("CORS_ORIGINS must contain exact HTTP(S) origins"))?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
-        || url.origin().ascii_serialization() != origin
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.host_str().is_some_and(|host| host.contains('*'))
     {
         return Err(ApiError::configuration(
             "CORS_ORIGINS must contain exact HTTP(S) origins without paths or wildcards",
         ));
     }
-    Ok(())
+    Ok(url.origin().ascii_serialization())
+}
+
+fn parse_cors_origins(raw: &str) -> Vec<String> {
+    let mut origins = Vec::new();
+    for entry in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        match normalize_cors_origin(entry) {
+            Ok(origin) if !origins.contains(&origin) => origins.push(origin),
+            Ok(_) => {}
+            Err(_) => {
+                // Do not log the raw value: a malformed URL may contain credentials.
+                // An invalid entry grants no browser access, while same-origin proxy
+                // traffic remains available even if the entire allowlist is invalid.
+                tracing::warn!("Ignoring invalid CORS_ORIGINS entry; no browser access granted for it. Use comma-separated HTTP(S) origins without paths, credentials, or wildcards.");
+            }
+        }
+    }
+    origins
 }
 
 #[cfg(test)]
 mod cors_tests {
-    use super::validate_cors_origin;
+    use super::{normalize_cors_origin, parse_cors_origins};
     #[test]
     fn cors_origins_are_exact_and_cannot_include_credentials_or_wildcards() {
         for valid in [
             "https://worldz-payments.vercel.app",
             "http://localhost:3000",
         ] {
-            assert!(validate_cors_origin(valid).is_ok());
+            assert!(normalize_cors_origin(valid).is_ok());
         }
         for invalid in [
             "*",
             "null",
-            "https://example.com/",
+            "https://*.example.com",
             "https://user:password@example.com",
             "https://example.com/path",
             "https://example.com?x=y",
+            "https://example.com/#fragment",
             "file:///tmp",
         ] {
-            assert!(validate_cors_origin(invalid).is_err(), "{invalid}");
+            assert!(normalize_cors_origin(invalid).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn cors_normalizes_root_slashes_case_and_default_ports() {
+        assert_eq!(
+            normalize_cors_origin("https://Worldz-Payments.Vercel.App:443/").unwrap(),
+            "https://worldz-payments.vercel.app"
+        );
+        assert_eq!(
+            normalize_cors_origin("http://localhost:3000/").unwrap(),
+            "http://localhost:3000"
+        );
+        assert_eq!(
+            parse_cors_origins(
+                " https://example.com/,https://EXAMPLE.com:443,http://localhost:3000/ "
+            ),
+            ["https://example.com", "http://localhost:3000"]
+        );
+    }
+
+    #[test]
+    fn invalid_cors_entries_grant_no_access_and_do_not_abort_startup() {
+        assert!(parse_cors_origins(
+            "*,null,https://user:secret@example.com,https://example.com/path"
+        )
+        .is_empty());
+        assert_eq!(
+            parse_cors_origins("*, https://example.com/, https://example.com/path"),
+            ["https://example.com"]
+        );
+        assert!(parse_cors_origins("").is_empty());
     }
 }
 

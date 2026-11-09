@@ -24,7 +24,7 @@ Order status and metadata require the owning merchant's session/API key, or the 
 
 Merchant API requests accept `Authorization: Bearer wzp_...`. Revoked keys immediately stop working. Keys inherit merchant access, so store them only in trusted server environments. Payout changes additionally require a fresh wallet signature.
 
-The Next.js proxy uses the same origin. Direct browser clients need an exact origin in `CORS_ORIGINS`; wildcards, paths and credentials are rejected. CORS is not authentication.
+The Next.js proxy uses the same origin. Direct browser clients need an origin in `CORS_ORIGINS`. Root trailing slashes, hostname case and default ports are normalized. Entries with wildcards, paths, query strings, fragments or credentials grant no cross-origin access and are ignored with a warning; they do not prevent the API from starting. CORS is not authentication.
 
 Public API traffic has bounded in-memory request budgets and a 32-request concurrency cap per process. Limits use the transport peer, never untrusted forwarded headers. Configure additional distributed limits at your trusted ingress for multiple replicas or proxies that share one transport address. HTTP reserves eight database connections; background workers share two. Worker failures back off up to five minutes and emit structured error logs with retry counts; connect those logs to your deployment's alerting service.
 
