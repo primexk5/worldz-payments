@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Check, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck, WalletCards } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NearLogo } from "@/components/atoms/near-logo";
 import { BrandMark } from "@/components/atoms/brand-mark";
 import { MonoLabel } from "@/components/atoms/mono-label";
@@ -15,6 +15,7 @@ import { calculateFee, calculateNet } from "@/lib/near/amounts";
 import { clearPendingPayment, getPendingPaymentForSlug, isVerifiedSettlement, registerFungibleTokenRecipients, savePendingPayment, submitAuthorizedPayment, TokenStorageRequiredError, waitForVerifiedSettlement, type PendingPayment } from "@/lib/near/payment";
 import { formatAssetAmount } from "@/lib/near/tokens";
 import type { LinkClaim, OrderStatus, PaymentLink } from "@/lib/near/types";
+import type { VtpassPurchaseStatus } from "@/lib/near/api";
 
 type PageState = "loading"|"ready"|"claiming"|"awaiting-wallet"|"processing"|"settled"|"refunded"|"not-found"|"error";
 
@@ -31,24 +32,36 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
   const [storageIssue,setStorageIssue]=useState<TokenStorageRequiredError|null>(null);
   const [registering,setRegistering]=useState(false);
   const [transactionHash,setTransactionHash]=useState("");
+  const [servicePurchaseId,setServicePurchaseId]=useState<string|null>(null);
+  const [serviceStatus,setServiceStatus]=useState<VtpassPurchaseStatus|null>(null);
+  const fulfillmentStarted=useRef(false);
 
   const applyStatus=useCallback((status:OrderStatus,current:PendingPayment)=>{
     setOrder(status);
     if(isVerifiedSettlement(status)||status.state==="REFUNDED"){
       setState(isVerifiedSettlement(status)?"settled":"refunded");
       clearPendingPayment(current);
+      if(isVerifiedSettlement(status)&&servicePurchaseId&&!fulfillmentStarted.current){
+        fulfillmentStarted.current=true;
+        void nearApi.vtpassFulfill(servicePurchaseId).then(setServiceStatus).catch((cause)=>{
+          setMessage(cause instanceof Error?cause.message:"Payment is verified; VTpass fulfillment status needs to be checked.");
+          void nearApi.vtpassPurchase(servicePurchaseId).then(setServiceStatus).catch(()=>undefined);
+        });
+      }
     }else if(status.state==="OPEN"&&status.failureReason){
       clearPendingPayment(current);setPending(null);setState("ready");setMessage(status.failureReason);
       if(status.authorization)setClaim({merchantId:status.merchantId,orderId:status.orderId,payerAccountId:status.payerAccountId,authorization:status.authorization});
     }else setState("processing");
-  },[]);
+  },[servicePurchaseId]);
 
   useEffect(()=>{
     let active=true;
     void params.then(async({slug:resolvedSlug})=>{
-      const value=await nearApi.link(resolvedSlug);
-      if(!active)return;
-      setSlug(resolvedSlug);setLink(value);
+       const value=await nearApi.link(resolvedSlug);
+       if(!active)return;
+       setSlug(resolvedSlug);setLink(value);
+       const purchaseId=new URLSearchParams(window.location.search).get("vtpassPurchase")??window.sessionStorage.getItem(`worldz:vtpass:purchase:${resolvedSlug}`);
+       if(purchaseId)setServicePurchaseId(purchaseId);
       const restored=getPendingPaymentForSlug(resolvedSlug);
       if(!restored){setCustomerName(window.sessionStorage.getItem(`worldz:near:customer:${resolvedSlug}`)??"");setState("ready");return;}
       const callbackHash=new URLSearchParams(window.location.search).get("transactionHashes")?.split(",")[0];
@@ -72,6 +85,15 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
   },[applyStatus]);
 
   useEffect(()=>{if(state!=="processing"||!pending)return;const interval=window.setInterval(()=>{void nearApi.order(pending.merchantId,pending.orderId,pending.transactionHash).then((status)=>applyStatus(status,pending)).catch(()=>{});},4000);return()=>window.clearInterval(interval);},[state,pending,applyStatus]);
+
+  useEffect(()=>{
+    if(state!=="settled"||!servicePurchaseId||serviceStatus?.state==="FULFILLED"||serviceStatus?.state==="FAILED")return;
+    let active=true;
+    const refresh=()=>void nearApi.vtpassPurchase(servicePurchaseId).then((status)=>{if(active)setServiceStatus(status);}).catch(()=>undefined);
+    refresh();
+    const interval=window.setInterval(refresh,4000);
+    return()=>{active=false;window.clearInterval(interval);};
+  },[state,servicePurchaseId,serviceStatus?.state]);
 
   // Edits to an existing checkout save automatically, including after a redirect.
   // The claim request also saves the initial name in the order transaction.
@@ -128,7 +150,7 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
     ? "RECONCILIATION_REQUIRED"
     : order?.state;
 
-  if(state==="settled"&&order)return <main className="min-h-screen bg-paper px-5 py-10"><div className="mx-auto w-full max-w-[460px]"><div className="flex items-center gap-4"><BrandMark/><span className="border-l border-line pl-4" aria-label="NEAR network"><NearLogo className="size-4"/></span></div><div className="mt-10"><NearReceipt order={{...order,paymentDescription:order.paymentDescription??link?.displayName,customerName:order.customerName??(customerName.trim()||null)}}/></div><div className="mt-5 text-center"><Link href="/" className="text-xs text-mist hover:text-ink">Return to WorldzPayments</Link></div></div></main>;
+  if(state==="settled"&&order)return <main className="min-h-screen bg-paper px-5 py-10"><div className="mx-auto w-full max-w-[460px]"><div className="flex items-center gap-4"><BrandMark/><span className="border-l border-line pl-4" aria-label="NEAR network"><NearLogo className="size-4"/></span></div><div className="mt-10"><NearReceipt order={{...order,paymentDescription:order.paymentDescription??link?.displayName,customerName:order.customerName??(customerName.trim()||null)}}/></div>{servicePurchaseId&&<section className="mt-4 rounded-2xl border border-line bg-white p-5"><p className="font-mono text-[10px] uppercase tracking-[.12em] text-mist">VTpass sandbox fulfillment</p><p className="mt-2 text-sm font-medium">{serviceStatus?.state?.replaceAll("_"," ")??"Checking provider status…"}</p><p className="mt-1 text-xs leading-5 text-mist">Payment settlement is confirmed separately from the VTpass service result.</p>{serviceStatus?.failureReason&&<p role="alert" className="mt-3 rounded-xl bg-alert/5 p-3 text-xs text-alert">{serviceStatus.failureReason}</p>}{serviceStatus?.providerResponse?.purchasedCode&&<div className="mt-3 rounded-xl bg-paper p-3"><p className="text-[10px] text-mist">Purchased code / electricity token</p><p className="mt-1 break-all font-mono text-xs">{serviceStatus.providerResponse.purchasedCode}</p></div>}{serviceStatus?.providerTransactionId&&<p className="mt-3 text-[10px] text-mist">VTpass transaction: {serviceStatus.providerTransactionId}</p>}</section>}<div className="mt-5 text-center"><Link href="/dashboard/services" className="text-xs text-green-deep underline underline-offset-4">Make another sandbox purchase</Link><span className="mx-3 text-mist">·</span><Link href="/" className="text-xs text-mist hover:text-ink">WorldzPayments</Link></div></div></main>;
 
   return <main className="min-h-screen bg-paper px-5 py-8 text-ink sm:py-12"><div className="mx-auto w-full max-w-[460px]"><header className="flex items-center justify-between"><div className="flex items-center gap-4"><BrandMark/><span className="border-l border-line pl-4" aria-label="NEAR network"><NearLogo className="size-4"/></span></div><Link href="/" className="inline-flex items-center gap-2 text-xs text-mist hover:text-ink"><ArrowLeft size={14}/>WorldzPayments</Link></header>
     <section className="mt-9 overflow-hidden rounded-[24px] border border-line bg-white shadow-[0_18px_65px_rgba(11,15,14,.07)]"><div className="border-b border-line/70 px-5 py-5 sm:px-7"><div className="flex items-center gap-2"><NearLogo className="size-4"/><MonoLabel>NEAR checkout · {NEAR_NETWORK_ID}</MonoLabel></div><h1 className="mt-2 text-xl font-semibold tracking-tight">{link?.displayName||link?.merchantId||"Secure checkout"}</h1><p className="mt-1 text-xs text-mist">Merchant payout goes directly to its configured NEAR account.</p></div>

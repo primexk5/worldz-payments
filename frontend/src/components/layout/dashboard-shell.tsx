@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CreditCard, LayoutDashboard, Link2, LogOut, Menu, Settings, X, CircleHelp, ShieldCheck, PanelLeftOpen, Pin, PinOff } from "lucide-react";
+import { BarChart3, CreditCard, LayoutDashboard, Link2, LogOut, Menu, Settings, X, CircleHelp, ShieldCheck, PanelLeftOpen, Pin, PinOff, Smartphone } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { NEAR_NETWORK_ID } from "@/lib/near/config";
@@ -16,6 +16,7 @@ import type { MerchantProfile } from "@/lib/near/types";
 const navigation = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Payment links", href: "/dashboard/links", icon: Link2 },
+  { label: "Nigeria services", href: "/dashboard/services", icon: Smartphone },
   { label: "Payments", href: "/dashboard/payments", icon: CreditCard },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -90,6 +91,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       {mobileMenuOpen && <div className="fixed inset-0 z-50 bg-ink/30 lg:hidden" onClick={() => setMobileMenuOpen(false)}><aside className="h-full w-[min(82vw,320px)] bg-paper p-5 shadow-xl" onClick={(event) => event.stopPropagation()}><div className="mb-8 flex items-center justify-between"><BrandMark /><button aria-label="Close dashboard menu" onClick={() => setMobileMenuOpen(false)}><X size={19} /></button></div><nav className="space-y-1">{navigation.map(({ label, href, icon: Icon }) => <Link onClick={() => setMobileMenuOpen(false)} key={href} href={href} className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm ${activeNavigation?.href === href ? "bg-paper font-medium text-ink" : "text-ink/70 hover:bg-white"}`}><Icon size={17} />{label}</Link>)}</nav><button onClick={() => void signOut()} className="mt-10 flex items-center gap-2 text-xs text-mist"><LogOut size={14} />Sign out</button></aside></div>}
       <main className="mx-auto w-full max-w-[1400px] px-4 py-7 sm:px-7 lg:px-10 lg:py-10">{error && !merchant && !loading ? <p className="rounded-xl border border-alert/20 bg-alert/5 p-4 text-sm text-alert">{error}</p> : loading ? <div role="status" className="space-y-6"><div className="h-16 w-2/5 rounded-xl bg-muted"/><div className="grid gap-4 sm:grid-cols-4">{[0,1,2,3].map(i=><div key={i} className="h-32 rounded-xl border border-line bg-white"/>)}</div><div className="h-80 rounded-xl border border-line bg-white"/><span className="sr-only">Loading workspace</span></div> : children}</main>
     </div>
-    <nav aria-label="Mobile dashboard tabs" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-line bg-white/95 px-1 py-2 backdrop-blur lg:hidden">{navigation.map(({ label, href, icon: Icon }) => <Link key={href} href={href} className={`flex flex-col items-center gap-1 py-1 text-[9px] ${activeNavigation?.href === href ? "text-ink" : "text-mist"}`}><Icon size={17} /><span>{label}</span></Link>)}</nav>
+    <nav aria-label="Mobile dashboard tabs" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-line bg-white/95 px-1 py-2 backdrop-blur lg:hidden">{navigation.map(({ label, href, icon: Icon }) => <Link key={href} href={href} className={`flex flex-col items-center gap-1 py-1 text-[9px] ${activeNavigation?.href === href ? "text-ink" : "text-mist"}`}><Icon size={17} /><span>{label}</span></Link>)}</nav>
   </div>;
 }

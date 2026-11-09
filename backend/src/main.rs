@@ -12,6 +12,7 @@ mod orders;
 mod security_tests;
 mod shopify;
 mod state;
+mod vtpass;
 mod webhooks;
 mod workers;
 

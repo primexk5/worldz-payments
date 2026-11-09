@@ -98,6 +98,30 @@ export const nearApi = {
   allowedAssets(signal?: AbortSignal) {
     return request<{ tokens: AllowedFungibleToken[] }>(`/assets?networkId=${NEAR_NETWORK_ID}`, { signal });
   },
+  vtpassCategories() {
+    return request<{ content?: { identifier: string; name: string }[] }>("/vtpass/categories");
+  },
+  vtpassServices(identifier: string) {
+    return request<{ content?: { serviceID: string; name: string; minimium_amount?: string; maximum_amount?: string; product_type?: string }[] }>(`/vtpass/services?identifier=${encodeURIComponent(identifier)}`);
+  },
+  vtpassVariations(serviceId: string) {
+    return request<{ content?: { variations?: { variation_code: string; name: string; variation_amount: string; fixedPrice?: string }[] } }>(`/vtpass/variations?serviceId=${encodeURIComponent(serviceId)}`);
+  },
+  vtpassQuote(input: { amountNgn: string; tokenDecimals: number }) {
+    return request<{ quoteId: string; amountNgn: string; amountUsd: string; tokenDecimals: number; tokenAmountBaseUnits: string; exchangeRateNgnPerUsd: string; fxSource: string; fxSourceUpdatedAtSeconds: number; expiresAtSeconds: number }>("/vtpass/quote", { method: "POST", body: body(input) });
+  },
+  vtpassVerify(input: { serviceID: string; billersCode: string; type?: string }) {
+    return request<Record<string, unknown>>("/vtpass/verify", { method: "POST", body: body(input) });
+  },
+  vtpassCreatePurchase(input: { linkSlug: string; quoteId: string; category: string; serviceID: string; variationCode?: string; providerFields: Record<string, string> }) {
+    return request<{ purchaseId: string; linkSlug: string; category: string; serviceID: string; amountNgn: string; amountUsd: string; state: string; networkId: string }>("/vtpass/purchases", { method: "POST", body: body(input) });
+  },
+  vtpassPurchase(purchaseId: string) {
+    return request<VtpassPurchaseStatus>(`/vtpass/purchases/${encodeURIComponent(purchaseId)}`, { cache: "no-store" });
+  },
+  vtpassFulfill(purchaseId: string) {
+    return request<VtpassPurchaseStatus>(`/vtpass/purchases/${encodeURIComponent(purchaseId)}/fulfill`, { method: "POST", body: "{}" });
+  },
   createLink(input: Omit<PaymentLink, "slug" | "createdAtMs" | "claimsUsed" | "merchantId" | "payoutAccountId">) {
     return request<PaymentLink>("/links", { method: "POST", body: body(input) });
   },
@@ -157,3 +181,16 @@ export const nearApi = {
     return request<AuthSession>("/onboarding", { method: "POST", body: body({ ...input, networkId: NEAR_NETWORK_ID }) });
   },
 };
+
+export interface VtpassPurchaseStatus {
+  purchaseId: string;
+  linkSlug: string;
+  category: string;
+  serviceID: string;
+  amountNgn: string;
+  amountUsd: string;
+  state: "AWAITING_PAYMENT" | "SUBMITTING" | "FULFILLMENT_PENDING" | "SUBMITTED" | "FULFILLED" | "FAILED" | "RECONCILIATION_REQUIRED";
+  providerTransactionId: string | null;
+  providerResponse: { code?: string | null; description?: string | null; requestId?: string | null; transactionId?: string | null; purchasedCode?: string | null; status?: string | null } | null;
+  failureReason: string | null;
+}

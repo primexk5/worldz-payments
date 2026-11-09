@@ -2,8 +2,17 @@ use std::sync::Arc;
 
 use reqwest::Client;
 use sqlx::PgPool;
+use std::time::Instant;
 
 use crate::config::AppConfig;
+
+#[derive(Clone)]
+pub struct CachedUsdNgnRate {
+    pub rate_micros: u128,
+    pub rate_display: String,
+    pub source_updated_at_seconds: i64,
+    pub fetched_at: Instant,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -12,6 +21,7 @@ pub struct AppState {
     pub http: Client,
     pub request_budget: Arc<crate::abuse::RequestBudget>,
     pub public_requests: Arc<tokio::sync::Semaphore>,
+    pub usd_ngn_rate: Arc<tokio::sync::Mutex<Option<CachedUsdNgnRate>>>,
 }
 
 impl AppState {
@@ -21,6 +31,7 @@ impl AppState {
             config: Arc::new(config),
             request_budget: Arc::new(crate::abuse::RequestBudget::default()),
             public_requests: Arc::new(tokio::sync::Semaphore::new(32)),
+            usd_ngn_rate: Arc::new(tokio::sync::Mutex::new(None)),
             http: Client::builder()
                 .timeout(std::time::Duration::from_secs(12))
                 .user_agent("WorldzPayments-NEAR-API/1.0")

@@ -18,6 +18,8 @@ WorldzPayments is a NEAR payment platform for merchants and their customers. It 
 
 The default configuration targets **NEAR testnet**. Mainnet requires its own contracts, accounts, signer configuration, and supported-token setup. The Shopify integration is a product-page checkout bridge, not a payment method inside Shopify’s native checkout.
 
+The dashboard also includes a **VTpass Nigeria sandbox** purchase flow for airtime, data, electricity, and one-time TV subscriptions. It only calls VTpass after a NEAR testnet order has verified settlement. The VTpass host is pinned to `sandbox.vtpass.com`; this demo does not convert test tokens into NGN or deliver real services.
+
 ## How a payment works
 
 1. A merchant signs in with a wallet and creates a payment link.
@@ -80,6 +82,8 @@ Fill in the settings in `backend/.env`:
 | `NEAR_TESTNET_SIGNER_SEED_BASE64` | Backend-only, base64-encoded 32-byte Ed25519 signing seed |
 | `NEAR_TESTNET_INDEXER_START_HEIGHT` | Router deployment height for indexing historical transactions; `0` starts near the current finalized tip |
 | `NEAR_TESTNET_FT_ALLOWLIST` | Token contracts enabled for checkout; align these with the router’s allowlist |
+| `VTPASS_API_KEY`, `VTPASS_PUBLIC_KEY`, `VTPASS_SECRET_KEY` | VTpass **sandbox** credentials; keep them in the backend environment only |
+| `VTPASS_DATA_ENCRYPTION_KEY_BASE64` | Separate random 32-byte key used to encrypt phone/meter/subscriber details at rest; generate with `openssl rand -base64 32` |
 | `SESSION_COOKIE_SECURE` | Use `false` for local HTTP and `true` for deployed HTTPS |
 
 To initialize a local testnet signing seed, the helper below writes a seed only if one is not already configured and prints its public key:
@@ -89,6 +93,8 @@ cargo run -p worldz-near-api --bin generate_testnet_signer
 ```
 
 Register the matching **public key** on the router using its admin account. The API and router must agree on the signer key ID, public key, network, and contract account. Keep existing signing seeds stable across deployments.
+
+For the VTpass flow, register at the [VTpass sandbox](https://sandbox.vtpass.com/register), create its API keys under **Account Settings → API Keys**, and set the four `VTPASS_*` credentials/encryption values in `backend/.env`. Use sandbox keys only. Quotes fetch the latest daily-updated USD-base/NGN reference rate from [open.er-api.com](https://open.er-api.com/v6/latest/USD), cache it in memory for 15 minutes, reject source data older than 48 hours, and persist the selected rate in the 10-minute quote so checkout uses the same price. This is a reference FX quote; the hackathon flow does not execute a crypto-to-fiat conversion. The service checkout is at `/dashboard/services` and requires a signed-in workspace, an enabled NEAR testnet fungible stable token, and a testnet wallet.
 
 Start the API from the repository root:
 

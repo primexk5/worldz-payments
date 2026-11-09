@@ -140,6 +140,10 @@ fn config(database_url: String) -> AppConfig {
         shopify_app_url: None,
         shopify_checkout_url: None,
         shopify_token_encryption_key: None,
+        vtpass_api_key: None,
+        vtpass_public_key: None,
+        vtpass_secret_key: None,
+        vtpass_data_encryption_key: None,
         testnet: network.clone(),
         mainnet: network,
     }

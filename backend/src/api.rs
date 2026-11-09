@@ -44,6 +44,20 @@ pub fn routes() -> Router<AppState> {
         .route("/assets", get(get_assets))
         .route("/network-config", get(get_network_config))
         .route("/payment-readiness", get(get_payment_readiness))
+        .route("/vtpass/categories", get(crate::vtpass::categories))
+        .route("/vtpass/services", get(crate::vtpass::services))
+        .route("/vtpass/variations", get(crate::vtpass::variations))
+        .route("/vtpass/quote", post(crate::vtpass::quote))
+        .route("/vtpass/verify", post(crate::vtpass::verify_customer))
+        .route("/vtpass/purchases", post(crate::vtpass::create_purchase))
+        .route(
+            "/vtpass/purchases/{purchase_id}",
+            get(crate::vtpass::purchase_status),
+        )
+        .route(
+            "/vtpass/purchases/{purchase_id}/fulfill",
+            post(crate::vtpass::fulfill_purchase),
+        )
         .route("/links", get(list_links).post(create_link))
         .route("/links/{slug}", get(get_link).delete(delete_link))
         .route("/links/{slug}/claim", post(claim_link))

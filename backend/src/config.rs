@@ -38,6 +38,10 @@ pub struct AppConfig {
     pub shopify_app_url: Option<String>,
     pub shopify_checkout_url: Option<String>,
     pub shopify_token_encryption_key: Option<[u8; 32]>,
+    pub vtpass_api_key: Option<String>,
+    pub vtpass_public_key: Option<String>,
+    pub vtpass_secret_key: Option<String>,
+    pub vtpass_data_encryption_key: Option<[u8; 32]>,
     pub testnet: NetworkConfig,
     pub mainnet: NetworkConfig,
 }
@@ -97,6 +101,21 @@ impl AppConfig {
                     })
                 })
                 .transpose()?,
+            vtpass_api_key: optional("VTPASS_API_KEY"),
+            vtpass_public_key: optional("VTPASS_PUBLIC_KEY"),
+            vtpass_secret_key: optional("VTPASS_SECRET_KEY"),
+            vtpass_data_encryption_key: optional("VTPASS_DATA_ENCRYPTION_KEY_BASE64")
+                .map(|key| {
+                    let decoded = STANDARD.decode(key).map_err(|_| {
+                        ApiError::configuration("VTPASS_DATA_ENCRYPTION_KEY_BASE64 must be base64")
+                    })?;
+                    decoded.try_into().map_err(|_| {
+                        ApiError::configuration(
+                            "VTPASS_DATA_ENCRYPTION_KEY_BASE64 must decode to 32 bytes",
+                        )
+                    })
+                })
+                .transpose()?,
             testnet,
             mainnet,
         };
@@ -125,6 +144,19 @@ impl AppConfig {
         {
             return Err(ApiError::configuration(
                 "WEBHOOK_SIGNING_SECRET must contain at least 32 characters",
+            ));
+        }
+        let vtpass_credentials = [
+            config.vtpass_api_key.is_some(),
+            config.vtpass_public_key.is_some(),
+            config.vtpass_secret_key.is_some(),
+        ];
+        if vtpass_credentials.iter().any(|configured| *configured)
+            && (!vtpass_credentials.iter().all(|configured| *configured)
+                || config.vtpass_data_encryption_key.is_none())
+        {
+            return Err(ApiError::configuration(
+                "VTpass requires VTPASS_API_KEY, VTPASS_PUBLIC_KEY, VTPASS_SECRET_KEY, and VTPASS_DATA_ENCRYPTION_KEY_BASE64",
             ));
         }
         let shopify_configured = config.shopify_api_key.is_some()
