@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sqlx::raw_sql(migration).execute(&mut *tx).await?;
     }
     sqlx::raw_sql("INSERT INTO merchants (merchant_id,account_id,payout_account_id,display_name) VALUES ('fixture','fixture.testnet','fixture.testnet','Fixture');
-        INSERT INTO payment_links (slug,merchant_id,network_id,asset,amount,amount_display,multi_pay,max_redemptions,claims_used) VALUES ('fixture','fixture','testnet','{\"type\":\"native\"}','10000','0.00000000000000000001',TRUE,2,2);")
+        INSERT INTO payment_links (slug,merchant_id,network_id,asset,amount,amount_display,display_name,multi_pay,max_redemptions,claims_used) VALUES ('fixture','fixture','testnet','{\"type\":\"native\"}','10000','0.00000000000000000001','Fixture',TRUE,2,2);")
         .execute(&mut *tx).await?;
     for (id, key, state, receipt) in [
         ("open", "0".repeat(64), "OPEN", None),

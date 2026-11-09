@@ -29,6 +29,9 @@ pub struct AppConfig {
     pub session_cookie_name: String,
     pub session_ttl_hours: i64,
     pub session_cookie_secure: bool,
+    /// Comma-separated list of allowed CORS origins (e.g. https://app.example.com).
+    /// Defaults to empty; same-origin proxy requests do not require CORS.
+    pub cors_origins: Vec<String>,
     pub webhook_signing_secret: Option<String>,
     pub shopify_api_key: Option<String>,
     pub shopify_api_secret: Option<String>,
@@ -72,6 +75,13 @@ impl AppConfig {
             session_cookie_name: value("SESSION_COOKIE_NAME", "worldz_session"),
             session_ttl_hours: parse("SESSION_TTL_HOURS", 168i64)?,
             session_cookie_secure: parse("SESSION_COOKIE_SECURE", true)?,
+            cors_origins: optional("CORS_ORIGINS")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect(),
             webhook_signing_secret: env::var("WEBHOOK_SIGNING_SECRET")
                 .ok()
                 .filter(|secret| !secret.is_empty()),
@@ -96,6 +106,9 @@ impl AppConfig {
             testnet,
             mainnet,
         };
+        for origin in &config.cors_origins {
+            validate_cors_origin(origin)?;
+        }
         if config.auth_challenge_ttl_seconds <= 0 || config.auth_challenge_ttl_seconds > 900 {
             return Err(ApiError::configuration(
                 "AUTH_CHALLENGE_TTL_SECONDS must be between 1 and 900",
@@ -164,6 +177,47 @@ impl AppConfig {
         match network_id {
             NetworkId::Testnet => &self.testnet,
             NetworkId::Mainnet => &self.mainnet,
+        }
+    }
+}
+
+fn validate_cors_origin(origin: &str) -> Result<(), ApiError> {
+    let url = url::Url::parse(origin)
+        .map_err(|_| ApiError::configuration("CORS_ORIGINS must contain exact HTTP(S) origins"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.origin().ascii_serialization() != origin
+    {
+        return Err(ApiError::configuration(
+            "CORS_ORIGINS must contain exact HTTP(S) origins without paths or wildcards",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use super::validate_cors_origin;
+    #[test]
+    fn cors_origins_are_exact_and_cannot_include_credentials_or_wildcards() {
+        for valid in [
+            "https://worldz-payments.vercel.app",
+            "http://localhost:3000",
+        ] {
+            assert!(validate_cors_origin(valid).is_ok());
+        }
+        for invalid in [
+            "*",
+            "null",
+            "https://example.com/",
+            "https://user:password@example.com",
+            "https://example.com/path",
+            "https://example.com?x=y",
+            "file:///tmp",
+        ] {
+            assert!(validate_cors_origin(invalid).is_err(), "{invalid}");
         }
     }
 }

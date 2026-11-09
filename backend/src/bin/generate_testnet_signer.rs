@@ -11,8 +11,26 @@ use rand::{rngs::OsRng, RngCore};
 const SEED_NAME: &str = "NEAR_TESTNET_SIGNER_SEED_BASE64";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let env_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".env");
-    let existing = fs::read_to_string(&env_path)?;
+    let rotation = std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--prepare-rotation");
+    // Preparing a replacement must not change the active signer before the hosted
+    // environment and router can be switched together.
+    let env_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(if rotation {
+        ".env.signer-rotation"
+    } else {
+        ".env"
+    });
+    let existing = match fs::read_to_string(&env_path) {
+        Ok(existing) => existing,
+        Err(error) if rotation && error.kind() == std::io::ErrorKind::NotFound => {
+            format!(
+                "NEAR_TESTNET_SIGNER_KEY_ID=worldz-testnet-{}\n",
+                uuid::Uuid::new_v4().simple()
+            )
+        }
+        Err(error) => return Err(error.into()),
+    };
     let configured_seed = existing
         .lines()
         .find_map(|line| line.trim().strip_prefix(&format!("{SEED_NAME}=")))
@@ -59,10 +77,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .try_into()
         .map_err(|_| "TestNet signer seed must decode to 32 bytes")?;
     let signer = SigningKey::from_bytes(&seed);
-    println!("signerKeyId=worldz-testnet-1");
+    let key_id = existing
+        .lines()
+        .find_map(|line| line.strip_prefix("NEAR_TESTNET_SIGNER_KEY_ID="))
+        .unwrap_or("worldz-testnet-1");
+    println!("signerKeyId={key_id}");
     println!(
         "signerPublicKeyBase64={}",
         STANDARD.encode(signer.verifying_key().to_bytes())
     );
+    if rotation {
+        println!(
+            "Replacement saved privately to {}. The active .env has not changed.",
+            env_path.display()
+        );
+    }
     Ok(())
 }

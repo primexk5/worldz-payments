@@ -20,6 +20,26 @@ The repository includes a Render Blueprint (`render.yaml`) and backend Dockerfil
 
 ## Settlement model
 
+Order status and metadata require the owning merchant's session/API key, or the private checkout token returned after wallet verification. Customer clients send that token in `x-checkout-token`; receipt-name edits also include `editToken` in the JSON body. Keep the token out of URLs and logs. Settled receipts are immutable. Status GET requests perform no reconciliation and processing/terminal responses omit the signed authorization. Submit transaction hashes through POST `/v1/orders/{merchantId}/{orderId}/meta`; the background worker verifies settlement.
+
+Merchant API requests accept `Authorization: Bearer wzp_...`. Revoked keys immediately stop working. Keys inherit merchant access, so store them only in trusted server environments. Payout changes additionally require a fresh wallet signature.
+
+The Next.js proxy uses the same origin. Direct browser clients need an exact origin in `CORS_ORIGINS`; wildcards, paths and credentials are rejected. CORS is not authentication.
+
+Public API traffic has bounded in-memory request budgets and a 32-request concurrency cap per process. Limits use the transport peer, never untrusted forwarded headers. Configure additional distributed limits at your trusted ingress for multiple replicas or proxies that share one transport address. HTTP reserves eight database connections; background workers share two. Worker failures back off up to five minutes and emit structured error logs with retry counts; connect those logs to your deployment's alerting service.
+
 Wallet transaction hashes are submission hints, not payment evidence. The reconciliation worker checks NEAR transaction/receipt results, parses `EVENT_JSON` from the configured router, then verifies the finalized router `get_order` view and both payout legs before persisting `SETTLED` and issuing the settlement receipt ID. Unverified or partial orders remain non-settled and are not webhooked as confirmed payments.
 
 The service requires a database and NEAR JSON-RPC but does not deploy or initialize contracts. Router IDs, fee recipients, signer public keys, and FT allowlists must be provisioned separately on the correct network. If no indexer start height is configured, the worker begins at the current finalized tip and does not backfill earlier blocks.
+
+## Verification and signer rotation
+
+Run `cargo test -p worldz-near-api`. To exercise real PostgreSQL permissions, API-key revocation, idempotent deletes and concurrent rate limits, point `SECURITY_TEST_DATABASE_URL` at a disposable PostgreSQL server, then run:
+
+```sh
+cargo test -p worldz-near-api postgres_checkout_access_api_keys_and_atomic_limits -- --ignored
+```
+
+The test creates a unique schema and removes it afterward. It never reads the application's `.env`.
+
+If a signing seed is exposed, prepare a replacement with `cargo run -p worldz-near-api --bin generate_testnet_signer -- --prepare-rotation`. This writes an ignored, permission-restricted `backend/.env.signer-rotation` file and prints only the public key. It does not switch the active signer. Enable the replacement public key on the router, update both private signer variables in the hosting environment, verify readiness, and disable the compromised key on the router. Never paste the seed into a chat or commit it. Database credentials require a separate provider-side rotation if exposed.

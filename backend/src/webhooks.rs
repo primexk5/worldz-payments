@@ -14,10 +14,15 @@ type HmacSha256 = Hmac<Sha256>;
 pub fn spawn_worker(state: AppState) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut backoff = crate::workers::Backoff::default();
         loop {
             interval.tick().await;
             if let Err(error) = deliver_batch(&state).await {
                 tracing::error!(%error, "webhook worker failed");
+                backoff.failed("webhooks").await;
+            } else {
+                backoff.reset();
             }
         }
     });
@@ -83,6 +88,9 @@ async fn send_webhook(
         .as_deref()
         .ok_or("WEBHOOK_SIGNING_SECRET is not configured")?;
     let url = Url::parse(endpoint)?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return Err("webhook URL must use HTTPS without credentials".into());
+    }
     let host = url.host_str().ok_or("webhook URL has no host")?;
     if matches!(host, "localhost" | "localhost.localdomain")
         || host.ends_with(".localhost")
@@ -109,6 +117,7 @@ async fn send_webhook(
     let signature = hex::encode(mac.finalize().into_bytes());
     // Bind DNS resolution into a one-shot client to reduce DNS-rebinding/redirect risk.
     let mut client_builder = reqwest::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(8))
         .redirect(reqwest::redirect::Policy::none())
         .user_agent("WorldzPayments-Webhooks/1.0");
@@ -133,25 +142,33 @@ async fn send_webhook(
 fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
             !ip.is_private()
                 && !ip.is_loopback()
                 && !ip.is_link_local()
                 && !ip.is_broadcast()
                 && !ip.is_unspecified()
                 && !ip.is_multicast()
-                && !ip.octets().starts_with(&[192, 0, 0])
-                && !ip.octets().starts_with(&[198, 18])
+                && a != 0
+                && a < 224
+                && !(a == 100 && (64..=127).contains(&b))
+                && !(a == 192 && b == 0 && (c == 0 || c == 2))
+                && !(a == 192 && b == 88 && c == 99)
+                && !(a == 198 && (b == 18 || b == 19 || (b == 51 && c == 100)))
+                && !(a == 203 && b == 0 && c == 113)
         }
         IpAddr::V6(ip) => {
-            !ip.is_loopback()
-                && !ip.is_unspecified()
-                && !ip.is_multicast()
-                && !ip.is_unique_local()
-                && !ip.is_unicast_link_local()
-                && ip
-                    .to_ipv4_mapped()
-                    .map(|mapped| is_public_ip(IpAddr::V4(mapped)))
-                    .unwrap_or(true)
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(mapped));
+            }
+            let [a, b, c, ..] = ip.segments();
+            // Only global unicast 2000::/3, excluding protocol assignments,
+            // documentation, benchmarking, and 6to4 transition addresses.
+            (a & 0xe000) == 0x2000
+                && !(a == 0x2001 && (b < 0x0200 || b == 0x0db8))
+                && !(a == 0x2002)
+                && !(a == 0x3fff && b < 0x1000)
+                && !(a == 0x2620 && b == 0x004f && c == 0x8000)
         }
     }
 }
@@ -173,6 +190,20 @@ mod tests {
             "::1",
             "fc00::1",
             "fe80::1",
+            "0.1.2.3",
+            "100.64.0.1",
+            "100.127.255.254",
+            "192.0.2.1",
+            "198.19.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "240.0.0.1",
+            "::ffff:100.64.0.1",
+            "::ffff:127.0.0.1",
+            "2001:db8::1",
+            "2002:7f00:1::1",
+            "3fff::1",
+            "64:ff9b::7f00:1",
         ] {
             assert!(
                 !is_public_ip(address.parse::<IpAddr>().unwrap()),
@@ -180,6 +211,7 @@ mod tests {
             );
         }
         assert!(is_public_ip("1.1.1.1".parse().unwrap()));
+        assert!(is_public_ip("::ffff:1.1.1.1".parse().unwrap()));
         assert!(is_public_ip("2606:4700:4700::1111".parse().unwrap()));
     }
 }

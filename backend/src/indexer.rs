@@ -12,12 +12,21 @@ const MAX_BLOCKS_PER_TICK: u64 = 4;
 pub fn spawn_indexer_worker(state: AppState) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut backoff = crate::workers::Backoff::default();
         loop {
             interval.tick().await;
+            let mut failed = false;
             for network_id in [NetworkId::Testnet, NetworkId::Mainnet] {
                 if let Err(error) = index_network(&state, network_id).await {
-                    tracing::debug!(network = network_id.as_str(), error = %error, "NEAR indexer will retry");
+                    tracing::warn!(network = network_id.as_str(), error = %error, "NEAR indexer will retry");
+                    failed = true;
                 }
+            }
+            if failed {
+                backoff.failed("indexer").await;
+            } else {
+                backoff.reset();
             }
         }
     });

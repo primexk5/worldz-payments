@@ -206,7 +206,7 @@ pub async fn proxy_checkout(
         .get("timestamp")
         .and_then(|value| value.parse::<i64>().ok())
         .ok_or_else(|| ApiError::forbidden("Shopify app proxy timestamp is invalid."))?;
-    if (Utc::now().timestamp() - timestamp).abs() > 86_400 {
+    if Utc::now().timestamp().abs_diff(timestamp) > 300 {
         return Err(ApiError::forbidden(
             "Shopify app proxy request has expired.",
         ));
@@ -541,17 +541,22 @@ fn decrypt_private_json<T: serde::de::DeserializeOwned>(
 pub fn spawn_order_sync_worker(state: AppState) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(StdDuration::from_secs(15));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut backoff = crate::workers::Backoff::default();
         loop {
             interval.tick().await;
             if let Err(error) = sqlx::query("UPDATE shopify_order_sync SET state='pending', next_attempt_at=UTC_TIMESTAMP(6) WHERE state='processing' AND updated_at < UTC_TIMESTAMP(6) - INTERVAL '5 minutes'")
                 .execute(&state.pool).await {
                 tracing::warn!(%error, "could not recover stale Shopify order sync jobs");
+                backoff.failed("shopify").await;
+                continue;
             }
             let rows = match sqlx::query("SELECT s.slug FROM shopify_order_sync s WHERE s.state='pending' AND s.next_attempt_at<=UTC_TIMESTAMP(6) ORDER BY s.created_at LIMIT 1")
                 .fetch_all(&state.pool).await {
                 Ok(rows) => rows,
-                Err(error) => { tracing::error!(%error, "could not load Shopify order sync queue"); continue; }
+                Err(error) => { tracing::error!(%error, "could not load Shopify order sync queue"); backoff.failed("shopify").await; continue; }
             };
+            backoff.reset();
             for row in rows {
                 let slug: String = match row.try_get("slug") {
                     Ok(slug) => slug,
@@ -864,7 +869,7 @@ fn verify_hmac(query: &CallbackQuery, secret: &str) -> Result<(), ApiError> {
         .timestamp
         .parse::<i64>()
         .map_err(|_| ApiError::forbidden("Shopify OAuth timestamp is invalid."))?;
-    if (Utc::now().timestamp() - timestamp).abs() > 86_400 {
+    if Utc::now().timestamp().abs_diff(timestamp) > 300 {
         return Err(ApiError::forbidden("Shopify OAuth request has expired."));
     }
     let mut params = query.extra.clone();

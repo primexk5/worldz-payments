@@ -32,6 +32,28 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 const body = (value: unknown) => JSON.stringify(value);
 
+function checkoutHeaders(merchantId: string, orderId: string): Record<string, string> {
+  const token = typeof window === "undefined" ? null : window.sessionStorage.getItem(`worldz:receipt-edit:${merchantId}:${orderId}`);
+  return token ? { "x-checkout-token": token } : {};
+}
+
+// Polling must not repeat an expensive RPC-backed submission on every status read.
+const submissions = new Map<string, Promise<void>>();
+
+function submitTransaction(merchantId: string, orderId: string, transactionHash: string, slug?: string): Promise<void> {
+  const key = `${merchantId}:${orderId}:${transactionHash}`;
+  const existing = submissions.get(key);
+  if (existing) return existing;
+  const submission = request<void>(`/orders/${encodeURIComponent(merchantId)}/${encodeURIComponent(orderId)}/meta`, {
+    method: "POST",
+    headers: checkoutHeaders(merchantId, orderId),
+    body: body({ transactionHash, slug, networkId: NEAR_NETWORK_ID }),
+  }).catch((error) => { submissions.delete(key); throw error; });
+  if (submissions.size >= 256) submissions.delete(submissions.keys().next().value!);
+  submissions.set(key, submission);
+  return submission;
+}
+
 export const nearApi = {
   request,
   challenge(accountId: string, state: string, intent: { purpose: "login" | "onboarding" | "payout_update" | "checkout"; checkoutSlug?: string; payoutAccountId?: string; displayName?: string; webhookUrl?: string } = { purpose: "login" }) {
@@ -85,7 +107,7 @@ export const nearApi = {
   link(slug: string) {
     return request<PaymentLink>(`/links/${encodeURIComponent(slug)}`);
   },
-  async claimLink(slug: string, payerAccountId: string, customerName?: string, proof?: {message:string;nonce:string;state:string;publicKey:string;signature:string}) {
+  async claimLink(slug: string, payerAccountId: string, customerName: string | undefined, proof: {message:string;nonce:string;state:string;publicKey:string;signature:string}) {
     const claim = await request<LinkClaim>(`/links/${encodeURIComponent(slug)}/claim`, {
       method: "POST",
       body: body({ payerAccountId, networkId: NEAR_NETWORK_ID, customerName: customerName?.trim() || undefined, proof }),
@@ -96,14 +118,23 @@ export const nearApi = {
   paymentReadiness() {
     return request<void>(`/payment-readiness?networkId=${NEAR_NETWORK_ID}`, { cache: "no-store" });
   },
-  order(merchantId: string, orderId: string, transactionHash?: string | null) {
+  async order(merchantId: string, orderId: string, transactionHash?: string | null) {
     const query = new URLSearchParams({ networkId: NEAR_NETWORK_ID });
-    if (transactionHash) query.set("transactionHash", transactionHash);
-    return request<OrderStatus>(`/orders/${encodeURIComponent(merchantId)}/${encodeURIComponent(orderId)}?${query.toString()}`);
+    let submissionError: unknown;
+    if (transactionHash) {
+      try { await submitTransaction(merchantId, orderId, transactionHash); }
+      catch (error) { submissionError = error; }
+    }
+    const status = await request<OrderStatus>(`/orders/${encodeURIComponent(merchantId)}/${encodeURIComponent(orderId)}?${query.toString()}`, { headers: checkoutHeaders(merchantId, orderId), cache: "no-store" });
+    // A temporary RPC failure must not hide an already verified receipt.
+    if (submissionError && status.state === "OPEN" && !status.transactionHash) throw submissionError;
+    return status;
   },
   submitPaymentMeta(merchantId: string, orderId: string, customerName?: string, slug?: string, transactionHash?: string) {
+    if (transactionHash && !customerName) return submitTransaction(merchantId, orderId, transactionHash, slug);
     return request<void>(`/orders/${encodeURIComponent(merchantId)}/${encodeURIComponent(orderId)}/meta`, {
       method: "POST",
+      headers: checkoutHeaders(merchantId, orderId),
       body: body({ customerName, slug, transactionHash, networkId: NEAR_NETWORK_ID, editToken: typeof window === "undefined" ? undefined : window.sessionStorage.getItem(`worldz:receipt-edit:${merchantId}:${orderId}`) ?? undefined }),
     });
   },

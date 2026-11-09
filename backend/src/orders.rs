@@ -1,5 +1,6 @@
 use sha2::{Digest, Sha256};
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{DateTime, Utc};
@@ -244,10 +245,14 @@ fn can_edit_name(stored: Option<&[u8]>, token: Option<&str>, state: &str, settle
     if settled || !matches!(state, "OPEN" | "PROCESSING") {
         return false;
     }
+    valid_checkout_token(stored, token)
+}
+
+pub fn valid_checkout_token(stored: Option<&[u8]>, token: Option<&str>) -> bool {
     let Some(token) = token.filter(|t| t.len() == 43) else {
         return false;
     };
-    stored.is_some_and(|stored| stored == &Sha256::digest(token.as_bytes())[..])
+    stored.is_some_and(|stored| bool::from(stored.ct_eq(&Sha256::digest(token.as_bytes())[..])))
 }
 
 fn normalized_customer_name(name: Option<&str>) -> Result<Option<&str>, ApiError> {
@@ -285,23 +290,6 @@ pub async fn get_order_status(
     order_id: &str,
     network_id: NetworkId,
 ) -> Result<OrderStatusDto, ApiError> {
-    let row = sqlx::query(
-        "SELECT * FROM orders WHERE merchant_id = ? AND order_id = ? AND network_id = ?",
-    )
-    .bind(merchant_id)
-    .bind(order_id)
-    .bind(network_id.as_str())
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| ApiError::not_found("Order not found."))?;
-    if row
-        .try_get::<Option<String>, _>("transaction_hash")?
-        .is_some()
-    {
-        if let Err(error) = reconcile_order(state, &row).await {
-            tracing::warn!(%merchant_id, %order_id, error = %error, "order status reconciliation deferred");
-        }
-    }
     let latest = sqlx::query(
         "SELECT o.*, NULLIF(TRIM(l.display_name), '') AS payment_description, m.display_name AS merchant_name \
          FROM orders o LEFT JOIN payment_links l ON l.slug = o.link_slug AND l.merchant_id = o.merchant_id \
@@ -311,8 +299,9 @@ pub async fn get_order_status(
     .bind(merchant_id)
     .bind(order_id)
     .bind(network_id.as_str())
-    .fetch_one(&state.pool)
-    .await?;
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Order not found."))?;
     order_status_from_row(&latest)
 }
 
@@ -412,6 +401,8 @@ pub async fn update_order_meta(
 pub fn spawn_reconciliation_worker(state: AppState) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut backoff = crate::workers::Backoff::default();
         loop {
             interval.tick().await;
             let rows = match sqlx::query(
@@ -426,13 +417,19 @@ pub fn spawn_reconciliation_worker(state: AppState) {
                 Ok(rows) => rows,
                 Err(error) => {
                     tracing::error!(%error, "could not load orders for reconciliation");
+                    backoff.failed("reconciliation").await;
                     continue;
                 }
             };
+            backoff.reset();
             for row in rows {
                 // Rotate attempted submissions even when RPC or payouts keep failing.
-                let _ = sqlx::query("UPDATE order_submissions SET next_reconcile_at=UTC_TIMESTAMP(6) + INTERVAL '30 seconds' WHERE network_id=? AND contract_id=? AND order_id=? AND transaction_hash=?")
-                    .bind(row.get::<String,_>("network_id")).bind(row.get::<String,_>("contract_id")).bind(row.get::<String,_>("order_id")).bind(row.get::<String,_>("reconciliation_tx_hash")).execute(&state.pool).await;
+                if let Err(error) = sqlx::query("UPDATE order_submissions SET next_reconcile_at=UTC_TIMESTAMP(6) + INTERVAL '30 seconds' WHERE network_id=? AND contract_id=? AND order_id=? AND transaction_hash=?")
+                    .bind(row.get::<String,_>("network_id")).bind(row.get::<String,_>("contract_id")).bind(row.get::<String,_>("order_id")).bind(row.get::<String,_>("reconciliation_tx_hash")).execute(&state.pool).await {
+                    tracing::error!(%error, "could not reschedule reconciliation");
+                    backoff.failed("reconciliation").await;
+                    break;
+                }
                 if let Err(error) = reconcile_order(&state, &row).await {
                     tracing::warn!(error = %error, "order reconciliation deferred");
                 }
@@ -873,7 +870,12 @@ fn order_status_from_row(row: &PgRow) -> Result<OrderStatusDto, ApiError> {
         settlement_receipt_id: row.try_get("settlement_receipt_id")?,
         updated_at_ms: row.get::<DateTime<Utc>, _>("updated_at").timestamp_millis(),
         failure_reason: row.try_get("failure_reason")?,
-        authorization: row.try_get("authorization")?,
+        // Only authenticated, unpaid checkouts need authorization for payment/retry.
+        authorization: if state == OrderState::Open {
+            row.try_get("authorization")?
+        } else {
+            None
+        },
     })
 }
 
@@ -952,8 +954,7 @@ mod tests {
 
     #[test]
     fn claim_requests_accept_an_optional_customer_name() {
-        let request =
-            json!({"payerAccountId":"payer.testnet","networkId":"testnet","customerName":"Yusef"});
+        let request = json!({"payerAccountId":"payer.testnet","networkId":"testnet","customerName":"Yusef","proof":{"message":"checkout","nonce":"nonce","state":"state","publicKey":"key","signature":"signature"}});
         let named: crate::models::ClaimLinkRequest =
             serde_json::from_value(request.clone()).unwrap();
         assert_eq!(named.customer_name.as_deref(), Some("Yusef"));

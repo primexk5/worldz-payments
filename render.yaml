@@ -16,6 +16,8 @@ services:
         value: https://worldz-payments.vercel.app
       - key: AUTH_NETWORK_ID
         value: testnet
+      - key: CORS_ORIGINS
+        value: https://worldz-payments.vercel.app
       - key: SESSION_COOKIE_SECURE
         value: "true"
       - key: NEAR_TESTNET_ROUTER_ID

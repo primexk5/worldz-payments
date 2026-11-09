@@ -87,6 +87,7 @@ pub struct OrderStatusDto {
     pub settlement_receipt_id: Option<String>,
     pub updated_at_ms: i64,
     pub failure_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub authorization: Option<Value>,
 }
 
@@ -248,7 +249,8 @@ pub struct ClaimLinkRequest {
     pub payer_account_id: String,
     pub network_id: NetworkId,
     pub customer_name: Option<String>,
-    pub proof: Option<WalletProof>,
+    /// Wallet signature proof is required — not optional at the type level.
+    pub proof: WalletProof,
 }
 
 #[derive(Clone, Debug, Deserialize)]

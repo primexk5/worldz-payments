@@ -50,7 +50,7 @@ impl ApiError {
         Self::new(
             StatusCode::TOO_MANY_REQUESTS,
             "rate_limited",
-            "Too many authentication attempts. Wait and try again.",
+            "Too many requests. Wait and try again.",
         )
     }
     pub fn unavailable(message: impl Into<String>) -> Self {

@@ -323,7 +323,7 @@ const merchant = await response.json();
 ```
 
 > **API keys in this release**
-> Settings supports issuing and revoking keys, and displays each secret once. The merchant routes currently validate session cookies; Bearer/API-key authentication is not implemented for those routes. Do not replace the session flow with an Authorization header in the examples below.
+> Settings supports issuing and revoking keys, and displays each secret once. Merchant routes accept a wallet-authenticated session or Authorization: Bearer wzp_... using an active key. Keys inherit merchant access; keep them on your server. Payout changes still require a fresh wallet proof. Customer order access uses the private checkout token returned after wallet verification.
 
 <a id="api-reference"></a>
 
@@ -347,8 +347,8 @@ Requests and responses use JSON with camelCase field names. The frontend proxy f
 | GET | /links/{slug} | Public · read an active payment link. |
 | DELETE | /links/{slug} | Session · deactivate a link and stop new claims; payment records remain. |
 | POST | /links/{slug}/claim | Public · create a payer-bound authorized order. |
-| GET | /orders/{merchantId}/{orderId}?networkId=testnet | Public · read and reconcile order status. |
-| POST | /orders/{merchantId}/{orderId}/meta | Record payer name or a validated submission hash. |
+| GET | /orders/{merchantId}/{orderId}?networkId=testnet | Merchant session/API key or private checkout token · read stored order status. |
+| POST | /orders/{merchantId}/{orderId}/meta | Authenticated merchant or checkout token · record a name or validated transaction hash. |
 | GET | /me/deliveries | Session · recent finalized payment events and webhook state. |
 | GET / POST | /me/apikeys | Session · list or issue keys. |
 | DELETE | /me/apikeys/{keyRef} | Session · revoke a key. |
@@ -447,13 +447,16 @@ const url = new URL(
   window.location.origin
 );
 url.searchParams.set("networkId", "testnet");
-const response = await fetch(url);
+const response = await fetch(url, {
+  headers: { "x-checkout-token": claim.editToken },
+  cache: "no-store",
+});
 if (!response.ok) throw new Error("Could not read order status");
 const order = await response.json();
 const settled = order.state === "SETTLED" && !!order.settlementReceiptId;
 ```
 
-An order response includes state, amount, fee, net, asset, payerAccountId, payoutAccountId, transactionHash, settlementReceiptId and updatedAtMs. Recorded paymentDescription, customerName and merchantName support receipts; older orders can have null values. A transactionHash query parameter can be supplied to help reconcile a submitted transaction; the service validates it against the order and payer.
+An order response includes state, amount, fee, net, asset, payerAccountId, payoutAccountId, transactionHash, settlementReceiptId and updatedAtMs. Recorded paymentDescription, customerName and merchantName support receipts; older orders can have null values. GET requests only read stored status. Submit transactionHash through authenticated POST /orders/{merchantId}/{orderId}/meta; the service validates the exact order and payer before queuing reconciliation. Customer requests include x-checkout-token: claim.editToken; merchant servers can use a session or API key. Authorization is returned only for authenticated OPEN orders and is omitted after processing starts.
 
 > **Handle storage and pending payments**
 > A custom checkout must handle TokenStorageRequiredError and registerFungibleTokenRecipients when token recipients need storage. Keep the submitted order/transaction reference if polling times out. A timeout is not proof of failure; read the existing order before any retry.

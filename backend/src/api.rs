@@ -265,7 +265,8 @@ async fn claim_link(
         .payer_account_id
         .parse::<near_account_id::AccountId>()
         .map_err(|_| ApiError::bad_request("Invalid payer account ID."))?;
-    let proof = input.proof.as_ref().ok_or_else(ApiError::unauthorized)?;
+    // proof is now required at the type level (non-optional field)
+    let proof = &input.proof;
     auth::consume_proof(
         &state,
         input.network_id,
@@ -292,24 +293,19 @@ async fn claim_link(
 
 async fn get_order(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((merchant_id, order_id)): Path<(String, String)>,
     Query(query): Query<NetworkQuery>,
 ) -> Result<Json<crate::models::OrderStatusDto>, ApiError> {
-    if let Some(transaction_hash) = query.transaction_hash.as_deref() {
-        orders::update_order_meta(
-            &state,
-            &merchant_id,
-            &order_id,
-            PaymentMetaRequest {
-                network_id: query.network_id,
-                edit_token: None,
-                customer_name: None,
-                slug: None,
-                transaction_hash: Some(transaction_hash.to_owned()),
-            },
-        )
-        .await?;
-    }
+    authorize_order(
+        &state,
+        &headers,
+        &merchant_id,
+        &order_id,
+        query.network_id,
+        None,
+    )
+    .await?;
     Ok(Json(
         orders::get_order_status(&state, &merchant_id, &order_id, query.network_id).await?,
     ))
@@ -317,11 +313,57 @@ async fn get_order(
 
 async fn update_order_meta(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((merchant_id, order_id)): Path<(String, String)>,
     Json(input): Json<PaymentMetaRequest>,
 ) -> Result<StatusCode, ApiError> {
+    authorize_order(
+        &state,
+        &headers,
+        &merchant_id,
+        &order_id,
+        input.network_id,
+        input.edit_token.as_deref(),
+    )
+    .await?;
     orders::update_order_meta(&state, &merchant_id, &order_id, input).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn authorize_order(
+    state: &AppState,
+    headers: &HeaderMap,
+    merchant_id: &str,
+    order_id: &str,
+    network_id: NetworkId,
+    body_token: Option<&str>,
+) -> Result<(), ApiError> {
+    // A capability is scoped to one wallet-verified checkout, including after settlement.
+    // Customers never need the merchant's session to read their receipt or recover a payment.
+    let token = headers
+        .get("x-checkout-token")
+        .and_then(|v| v.to_str().ok())
+        .or(body_token);
+    if let Some(token) = token {
+        let row = sqlx::query("SELECT edit_token_hash FROM orders WHERE merchant_id=? AND order_id=? AND network_id=?")
+            .bind(merchant_id).bind(order_id).bind(network_id.as_str())
+            .fetch_optional(&state.pool).await?;
+        let stored = row
+            .map(|row| row.try_get::<Option<Vec<u8>>, _>("edit_token_hash"))
+            .transpose()?
+            .flatten();
+        if orders::valid_checkout_token(stored.as_deref(), Some(token)) {
+            return Ok(());
+        }
+        return Err(ApiError::unauthorized());
+    }
+    let merchant = auth::current_merchant(state, headers).await?;
+    if merchant.merchant_id != merchant_id {
+        return Err(ApiError::forbidden(
+            "This order belongs to another merchant.",
+        ));
+    }
+    Ok(())
 }
 
 async fn get_deliveries(
@@ -454,7 +496,6 @@ async fn revoke_api_key(
 #[serde(rename_all = "camelCase")]
 struct NetworkQuery {
     network_id: NetworkId,
-    transaction_hash: Option<String>,
 }
 
 async fn validate_link_request(

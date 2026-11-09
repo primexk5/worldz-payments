@@ -381,6 +381,24 @@ pub async fn current_merchant(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<MerchantProfile, ApiError> {
+    if let Some(value) = headers.get(header::AUTHORIZATION) {
+        let value = value.to_str().map_err(|_| ApiError::unauthorized())?;
+        let (scheme, token) = value.split_once(' ').ok_or_else(ApiError::unauthorized)?;
+        if !scheme.eq_ignore_ascii_case("bearer") || !valid_api_key(token) {
+            return Err(ApiError::unauthorized());
+        }
+        let row = sqlx::query(
+            "UPDATE merchant_api_keys k SET last_used_at=CURRENT_TIMESTAMP FROM merchants m \
+             WHERE k.merchant_id=m.merchant_id AND k.secret_hash=? AND k.revoked_at IS NULL \
+             AND m.auth_network_id=? RETURNING m.*",
+        )
+        .bind(hash_token(token).as_slice())
+        .bind(state.config.auth_network_id.as_str())
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+        return Ok(merchant_from_row(&row));
+    }
     let token = cookie_value(headers, &state.config.session_cookie_name)
         .ok_or_else(ApiError::unauthorized)?;
     let row = sqlx::query(
@@ -393,6 +411,14 @@ pub async fn current_merchant(
     .await?
     .ok_or_else(ApiError::unauthorized)?;
     Ok(merchant_from_row(&row))
+}
+
+fn valid_api_key(token: &str) -> bool {
+    token.len() == 47
+        && token.starts_with("wzp_")
+        && token[4..]
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 pub async fn consume_proof(
@@ -464,26 +490,25 @@ pub async fn consume_proof(
     Ok(())
 }
 
-async fn enforce_rate_limit(
+pub(crate) async fn enforce_rate_limit(
     state: &AppState,
     subject: &str,
     max_attempts: i32,
 ) -> Result<(), ApiError> {
-    sqlx::query("DELETE FROM auth_rate_limits WHERE window_started_at < UTC_TIMESTAMP(6) - INTERVAL '1 day'").execute(&state.pool).await?;
-    sqlx::query(
+    // PostgreSQL locks the conflicting row; rejected attempts do not increase the counter.
+    let accepted = sqlx::query(
         "INSERT INTO auth_rate_limits (subject, window_started_at, attempts) VALUES (?, UTC_TIMESTAMP(6), 1) \
          ON CONFLICT (subject) DO UPDATE SET \
            attempts = CASE WHEN auth_rate_limits.window_started_at < UTC_TIMESTAMP(6) - INTERVAL '15 minutes' THEN 1 ELSE auth_rate_limits.attempts + 1 END, \
-           window_started_at = CASE WHEN auth_rate_limits.window_started_at < UTC_TIMESTAMP(6) - INTERVAL '15 minutes' THEN UTC_TIMESTAMP(6) ELSE auth_rate_limits.window_started_at END",
+           window_started_at = CASE WHEN auth_rate_limits.window_started_at < UTC_TIMESTAMP(6) - INTERVAL '15 minutes' THEN UTC_TIMESTAMP(6) ELSE auth_rate_limits.window_started_at END \
+         WHERE auth_rate_limits.window_started_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes' OR auth_rate_limits.attempts < ? \
+         RETURNING attempts",
     )
     .bind(subject)
-    .execute(&state.pool)
-    .await?;
-    let row = sqlx::query("SELECT attempts FROM auth_rate_limits WHERE subject = ?")
-        .bind(subject)
-        .fetch_one(&state.pool)
+    .bind(max_attempts)
+        .fetch_optional(&state.pool)
         .await?;
-    if row.try_get::<i32, _>("attempts")? > max_attempts {
+    if accepted.is_none() {
         return Err(ApiError::rate_limited());
     }
     Ok(())
@@ -557,7 +582,11 @@ fn verify_challenge_intent(
                 .get("payoutAccountId")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            if !message.contains(&format!("Payout: {payout}")) {
+            // Use line-exact matching to prevent message injection via crafted account IDs.
+            if !message
+                .lines()
+                .any(|line| line == format!("Payout: {payout}"))
+            {
                 return Err(ApiError::unauthorized());
             }
             if matches!(purpose, ChallengePurpose::Onboarding) {
@@ -565,14 +594,20 @@ fn verify_challenge_intent(
                     .get("displayName")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                if !message.contains(&format!("Display name: {display}")) {
+                if !message
+                    .lines()
+                    .any(|line| line == format!("Display name: {display}"))
+                {
                     return Err(ApiError::unauthorized());
                 }
                 let webhook = intent
                     .get("webhookUrl")
                     .and_then(Value::as_str)
                     .unwrap_or("none");
-                if !message.contains(&format!("Webhook: {webhook}")) {
+                if !message
+                    .lines()
+                    .any(|line| line == format!("Webhook: {webhook}"))
+                {
                     return Err(ApiError::unauthorized());
                 }
             }
@@ -762,6 +797,25 @@ fn merchant_from_row(row: &PgRow) -> MerchantProfile {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn intent_fields_must_match_whole_lines() {
+        let intent = serde_json::json!({"payoutAccountId":"pay.testnet","displayName":"Shop","webhookUrl":"none"});
+        let purpose = crate::models::ChallengePurpose::Onboarding;
+        assert!(super::verify_challenge_intent(
+            purpose,
+            &intent,
+            "Payout: pay.testnet\nDisplay name: Shop\nWebhook: none"
+        )
+        .is_ok());
+        for message in [
+            "Payout: pay.testnet.attacker\nDisplay name: Shop\nWebhook: none",
+            "Payout: pay.testnet\nDisplay name: Shop Attacker\nWebhook: none",
+            "prefix Payout: pay.testnet\nDisplay name: Shop\nWebhook: none",
+            "Payout: pay.testnet\nDisplay name: Shop\nWebhook: none.attacker",
+        ] {
+            assert!(super::verify_challenge_intent(purpose, &intent, message).is_err());
+        }
+    }
     #[test]
     fn caller_budgets_do_not_trust_account_names_or_forwarded_addresses() {
         use axum::http::{HeaderMap, HeaderValue};
