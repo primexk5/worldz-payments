@@ -601,30 +601,65 @@ pub async fn reconcile_order(state: &AppState, row: &PgRow) -> Result<(), ApiErr
         ));
     }
 
+    let receipt = SettlementReceipt {
+        transaction_hash: &transaction_hash,
+        receipt_id: &receipt_id,
+        log_index,
+        payout_account_id: data
+            .get("payoutAccountId")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    };
+    finalize_settlement(
+        state,
+        row,
+        network_id,
+        &contract_id,
+        &order_id,
+        &merchant_id,
+        &payer,
+        receipt,
+    )
+    .await
+}
+
+pub(crate) struct SettlementReceipt<'a> {
+    pub transaction_hash: &'a str,
+    pub receipt_id: &'a str,
+    pub log_index: usize,
+    pub payout_account_id: &'a str,
+}
+
+pub(crate) async fn finalize_settlement(
+    state: &AppState,
+    row: &PgRow,
+    network_id: NetworkId,
+    contract_id: &str,
+    order_id: &str,
+    merchant_id: &str,
+    payer: &str,
+    receipt: SettlementReceipt<'_>,
+) -> Result<(), ApiError> {
     let asset: AssetDto =
         serde_json::from_value(row.try_get("asset")?).map_err(|_| ApiError::internal())?;
     let event_id = format!(
         "{}:{}:{}:{}",
         network_id.as_str(),
         contract_id,
-        receipt_id,
-        log_index
+        receipt.receipt_id,
+        receipt.log_index
     );
     let dto = PaymentEventDto {
         id: event_id.clone(),
         network_id,
-        contract_id: contract_id.clone(),
-        receipt_id: receipt_id.clone(),
-        settlement_receipt_id: Some(receipt_id.clone()),
-        transaction_hash: transaction_hash.clone(),
-        order_id: order_id.clone(),
-        merchant_id: merchant_id.clone(),
-        payer_account_id: payer,
-        payout_account_id: data
-            .get("payoutAccountId")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
+        contract_id: contract_id.to_owned(),
+        receipt_id: receipt.receipt_id.to_owned(),
+        settlement_receipt_id: Some(receipt.receipt_id.to_owned()),
+        transaction_hash: receipt.transaction_hash.to_owned(),
+        order_id: order_id.to_owned(),
+        merchant_id: merchant_id.to_owned(),
+        payer_account_id: payer.to_owned(),
+        payout_account_id: receipt.payout_account_id.to_owned(),
         asset,
         amount: row.try_get("amount")?,
         fee: row.try_get("fee")?,
@@ -637,15 +672,34 @@ pub async fn reconcile_order(state: &AppState, row: &PgRow) -> Result<(), ApiErr
     };
     let payload = serde_json::to_value(dto).map_err(|_| ApiError::internal())?;
     let mut tx = state.pool.begin().await?;
-    sqlx::query("SELECT slug FROM payment_links WHERE slug=? FOR UPDATE")
-        .bind(row.try_get::<Option<String>, _>("link_slug")?)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let link_budget = sqlx::query(
+        "SELECT max_redemptions, claims_used FROM payment_links WHERE slug=? FOR UPDATE",
+    )
+    .bind(row.try_get::<Option<String>, _>("link_slug")?)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(budget_row) = link_budget {
+        let max_redemptions: Option<i32> = budget_row.try_get("max_redemptions")?;
+        let claims_used: i32 = budget_row.try_get("claims_used")?;
+        if let Some(max_redemptions) = max_redemptions {
+            if claims_used >= max_redemptions {
+                sqlx::query("UPDATE orders SET state='RECONCILIATION_REQUIRED', failure_reason=?, updated_at=UTC_TIMESTAMP(6) WHERE network_id=? AND contract_id=? AND order_id=? AND settlement_receipt_id IS NULL")
+                    .bind("Payment link redemption budget was already consumed by another payment. No additional settlement was recorded.")
+                    .bind(network_id.as_str())
+                    .bind(contract_id)
+                    .bind(order_id)
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+                return Ok(());
+            }
+        }
+    }
     let settled = sqlx::query("UPDATE orders SET state='SETTLED', settlement_receipt_id=?, failure_reason=NULL, updated_at=UTC_TIMESTAMP(6) WHERE network_id=? AND contract_id=? AND order_id=? AND settlement_receipt_id IS NULL")
-        .bind(&receipt_id)
+        .bind(receipt.receipt_id)
         .bind(network_id.as_str())
-        .bind(&contract_id)
-        .bind(&order_id)
+        .bind(contract_id)
+        .bind(order_id)
         .execute(&mut *tx)
         .await?;
     if settled.rows_affected() == 1 {
@@ -657,34 +711,34 @@ pub async fn reconcile_order(state: &AppState, row: &PgRow) -> Result<(), ApiErr
     sqlx::query(
         "UPDATE orders SET transaction_hash=? WHERE network_id=? AND contract_id=? AND order_id=?",
     )
-    .bind(&transaction_hash)
+    .bind(receipt.transaction_hash)
     .bind(network_id.as_str())
-    .bind(&contract_id)
-    .bind(&order_id)
+    .bind(contract_id)
+    .bind(order_id)
     .execute(&mut *tx)
     .await?;
     sqlx::query("INSERT IGNORE INTO payment_events (event_id, network_id, contract_id, receipt_id, transaction_hash, order_id, merchant_id, payload, finalized) VALUES (?,?,?,?,?,?,?, ?,true)")
         .bind(&event_id)
         .bind(network_id.as_str())
-        .bind(&contract_id)
-        .bind(&receipt_id)
-        .bind(&transaction_hash)
-        .bind(&order_id)
-        .bind(&merchant_id)
+        .bind(contract_id)
+        .bind(receipt.receipt_id)
+        .bind(receipt.transaction_hash)
+        .bind(order_id)
+        .bind(merchant_id)
         .bind(payload)
         .execute(&mut *tx)
         .await?;
     sqlx::query("INSERT IGNORE INTO webhook_deliveries (delivery_id, event_id, merchant_id, state) SELECT ?,?, ?, CASE WHEN m.webhook_url IS NULL THEN 'skipped' ELSE 'pending' END FROM merchants m WHERE m.merchant_id=?")
         .bind(uuid::Uuid::new_v4())
         .bind(&event_id)
-        .bind(&merchant_id)
-        .bind(&merchant_id)
+        .bind(merchant_id)
+        .bind(merchant_id)
         .execute(&mut *tx)
         .await?;
     sqlx::query("INSERT IGNORE INTO shopify_order_sync (slug) SELECT c.slug FROM shopify_checkout_sessions c JOIN orders o ON o.link_slug=c.slug WHERE o.network_id=? AND o.contract_id=? AND o.order_id=?")
         .bind(network_id.as_str())
-        .bind(&contract_id)
-        .bind(&order_id)
+        .bind(contract_id)
+        .bind(order_id)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
