@@ -926,7 +926,7 @@ fn order_status_from_row(row: &PgRow) -> Result<OrderStatusDto, ApiError> {
         failure_reason: row.try_get("failure_reason")?,
         // Only authenticated, unpaid checkouts need authorization for payment/retry.
         authorization: if state == OrderState::Open {
-            row.try_get("authorization")?
+            row.try_get::<Option<Value>, _>("authorization")?
         } else {
             None
         },

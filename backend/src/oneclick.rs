@@ -1,8 +1,19 @@
 use std::sync::Arc;
 
+use axum::{
+    extract::{Path, State},
+    Json,
+};
+use chrono::Utc;
+use serde::Deserialize;
 use serde_json::{json, Value};
+use sqlx::Row;
+use uuid::Uuid;
+use worldz_near_protocol::NetworkId;
 
+use crate::db::sqlx;
 use crate::error::ApiError;
+use crate::models::AssetDto;
 use crate::state::{AppState, CachedOneClickTokens};
 
 const TOKENS_CACHE_TTL_SECONDS: u64 = 600;
@@ -423,7 +434,7 @@ pub(crate) async fn live_status(
     parse_status_response(&payload)
 }
 
-pub(crate) async fn submit_deposit(
+pub(crate) async fn submit_deposit_tx(
     state: &AppState,
     deposit_address: &str,
     tx_hash: &str,
@@ -452,6 +463,534 @@ pub(crate) async fn submit_deposit(
         ApiError::unavailable("1Click deposit submission returned an invalid response.")
     })?;
     parse_status_response(&payload)
+}
+
+const WET_QUOTE_REQUEST_DEADLINE_SECONDS: i64 = 15 * 60;
+const MOCK_SETTLE_DELAY_SECONDS: i64 = 15;
+const OPEN_ATTEMPT_STATUSES: [&str; 4] = [
+    "AWAITING_DEPOSIT",
+    "PENDING_DEPOSIT",
+    "PROCESSING",
+    "INCOMPLETE_DEPOSIT",
+];
+
+fn enabled(state: &AppState) -> Result<(), ApiError> {
+    if !state.config.oneclick_enabled {
+        return Err(ApiError::unavailable(
+            "Cross-chain payments are not enabled on this deployment.",
+        ));
+    }
+    Ok(())
+}
+
+fn simulated(state: &AppState) -> bool {
+    state.config.oneclick_enabled && state.config.oneclick_mode == "mock"
+}
+
+fn parse_payload_asset(payload: &Value) -> Result<AssetDto, ApiError> {
+    serde_json::from_value(payload.clone())
+        .map_err(|_| ApiError::unavailable("Payment link asset is invalid."))
+}
+
+fn resolve_destination_asset<'a>(
+    tokens: &'a [OneClickToken],
+    asset: &AssetDto,
+) -> Result<&'a str, ApiError> {
+    match asset {
+        AssetDto::Native { .. } => Err(ApiError::bad_request(
+            "Native NEAR receive links cannot accept cross-chain payments. Use a NEP-141 receive token.",
+        )),
+        AssetDto::Nep141 { contract_id, .. } => tokens
+            .iter()
+            .find(|token| {
+                token.asset_id.starts_with("nep141:")
+                    && token.contract_address.as_deref() == Some(contract_id.as_str())
+            })
+            .map(|token| token.asset_id.as_str())
+            .ok_or_else(|| ApiError::bad_request(
+                "The merchant's receive token is not in the 1Click token list, so it cannot receive cross-chain payments.",
+            )),
+    }
+}
+
+fn origin_token<'a>(
+    tokens: &'a [OneClickToken],
+    origin_asset: &str,
+) -> Result<&'a OneClickToken, ApiError> {
+    tokens
+        .iter()
+        .find(|token| token.asset_id == origin_asset)
+        .ok_or_else(|| ApiError::bad_request(
+            "The selected token is not in the 1Click token list. Refresh the token picker and choose again.",
+        ))
+}
+
+fn mock_amount_in(
+    origin_decimals: u8,
+    destination_decimals: u8,
+    amount_out: &str,
+    slippage_bps: u32,
+) -> Result<String, ApiError> {
+    let amount: u128 = amount_out.parse().map_err(|_| ApiError::internal())?;
+    let mut amount_in = if origin_decimals >= destination_decimals {
+        amount
+            .checked_mul(10u128.pow(u32::from(origin_decimals - destination_decimals)))
+            .ok_or_else(|| ApiError::bad_request("The payment amount is too large."))?
+    } else {
+        amount / 10u128.pow(u32::from(destination_decimals - origin_decimals))
+    };
+    amount_in = amount_in.saturating_add(
+        amount_in
+            .saturating_mul(u128::from(slippage_bps))
+            .saturating_div(10_000),
+    );
+    if amount_in == 0 {
+        return Err(ApiError::bad_request(
+            "The payment amount is too small to swap.",
+        ));
+    }
+    Ok(amount_in.to_string())
+}
+
+fn mock_deposit_address() -> String {
+    let mut hex = String::with_capacity(42);
+    hex.push_str("0x");
+    while hex.len() < 42 {
+        hex.push_str(&Uuid::new_v4().simple().to_string());
+    }
+    hex.truncate(42);
+    hex
+}
+
+struct LinkContext {
+    slug: String,
+    merchant_id: String,
+    payout_account_id: String,
+    network_id: NetworkId,
+    asset: AssetDto,
+    amount: String,
+    max_redemptions: Option<i32>,
+    claims_used: i32,
+}
+
+async fn load_active_link(state: &AppState, slug: &str) -> Result<LinkContext, ApiError> {
+    let row = sqlx::query(
+        "SELECT l.slug, l.merchant_id, l.network_id, l.asset, l.amount, l.expires_at, l.max_redemptions, l.claims_used, m.payout_account_id \
+         FROM payment_links l JOIN merchants m USING (merchant_id) WHERE l.slug=? AND l.active",
+    )
+    .bind(slug)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Payment link not found."))?;
+    let expires_at: Option<chrono::DateTime<Utc>> = row.try_get("expires_at")?;
+    if expires_at.is_some_and(|time| time <= Utc::now()) {
+        return Err(ApiError::not_found("Payment link has expired."));
+    }
+    let network_raw: String = row.try_get("network_id")?;
+    let network_id = match network_raw.as_str() {
+        "testnet" => NetworkId::Testnet,
+        "mainnet" => NetworkId::Mainnet,
+        _ => return Err(ApiError::internal()),
+    };
+    let asset_value: Value = row.try_get("asset")?;
+    Ok(LinkContext {
+        slug: row.try_get("slug")?,
+        merchant_id: row.try_get("merchant_id")?,
+        payout_account_id: row.try_get("payout_account_id")?,
+        network_id,
+        asset: parse_payload_asset(&asset_value)?,
+        amount: row.try_get("amount")?,
+        max_redemptions: row.try_get("max_redemptions")?,
+        claims_used: row.try_get("claims_used")?,
+    })
+}
+
+fn link_accepts_new_payments(link: &LinkContext) -> Result<(), ApiError> {
+    if let Some(max_redemptions) = link.max_redemptions {
+        if link.claims_used >= max_redemptions {
+            return Err(ApiError::conflict(
+                "This payment link has already been paid the maximum number of times.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_live_mode_network(state: &AppState, link: &LinkContext) -> Result<(), ApiError> {
+    if state.config.oneclick_mode == "live" && link.network_id != NetworkId::Mainnet {
+        return Err(ApiError::bad_request(
+            "Cross-chain payments are available on NEAR mainnet only.",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DryQuoteInput {
+    origin_asset: String,
+    refund_to: String,
+    slippage_bps: Option<u32>,
+}
+
+pub async fn tokens_handler(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    enabled(&state)?;
+    let tokens = tokens(&state).await?;
+    let items: Vec<Value> = tokens
+        .iter()
+        .map(|token| {
+            json!({
+                "assetId": token.asset_id,
+                "blockchain": token.blockchain,
+                "symbol": token.symbol,
+                "decimals": token.decimals,
+                "contractAddress": token.contract_address,
+            })
+        })
+        .collect();
+    Ok(Json(json!({
+        "mode": state.config.oneclick_mode,
+        "tokens": items,
+    })))
+}
+
+pub async fn quote(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Json(input): Json<DryQuoteInput>,
+) -> Result<Json<Value>, ApiError> {
+    enabled(&state)?;
+    let link = load_active_link(&state, &slug).await?;
+    link_accepts_new_payments(&link)?;
+    require_live_mode_network(&state, &link)?;
+    let tokens = tokens(&state).await?;
+    let destination_asset = resolve_destination_asset(&tokens, &link.asset)?.to_owned();
+    let origin = origin_token(&tokens, input.origin_asset.trim())?;
+    let params = QuoteParams {
+        origin_asset: origin.asset_id.clone(),
+        destination_asset,
+        amount_out: link.amount.clone(),
+        recipient: link.payout_account_id.clone(),
+        refund_to: input.refund_to.trim().to_owned(),
+        refund_type: "ORIGIN_CHAIN",
+        slippage_bps: input.slippage_bps.unwrap_or(DEFAULT_SLIPPAGE_BPS),
+    };
+    let quote = if simulated(&state) {
+        let amount_in = mock_amount_in(
+            origin.decimals,
+            token_decimals(&tokens, &link.asset)?,
+            &link.amount,
+            params.slippage_bps,
+        )?;
+        let min_amount_in = amount_in.clone();
+        OneClickQuote {
+            deposit_address: None,
+            deposit_memo: None,
+            amount_in,
+            min_amount_in,
+            amount_out: link.amount.clone(),
+            deadline: None,
+            time_estimate_seconds: MOCK_SETTLE_DELAY_SECONDS,
+        }
+    } else {
+        live_quote(
+            &state,
+            &params,
+            true,
+            Utc::now().timestamp() + WET_QUOTE_REQUEST_DEADLINE_SECONDS,
+        )
+        .await?
+    };
+    Ok(Json(json!({
+        "amountIn": quote.amount_in,
+        "minAmountIn": quote.min_amount_in,
+        "amountOut": quote.amount_out,
+        "originDecimals": origin.decimals,
+        "timeEstimateSeconds": quote.time_estimate_seconds,
+        "expiresAtSeconds": Utc::now().timestamp() + WET_QUOTE_REQUEST_DEADLINE_SECONDS,
+        "simulated": simulated(&state),
+    })))
+}
+
+fn token_decimals(tokens: &[OneClickToken], asset: &AssetDto) -> Result<u8, ApiError> {
+    let AssetDto::Nep141 { contract_id, .. } = asset else {
+        return Err(ApiError::bad_request(
+            "Native NEAR receive links cannot accept cross-chain payments. Use a NEP-141 receive token.",
+        ));
+    };
+    Ok(tokens
+        .iter()
+        .find(|token| {
+            token.asset_id.starts_with("nep141:")
+                && token.contract_address.as_deref() == Some(contract_id.as_str())
+        })
+        .map(|token| token.decimals)
+        .unwrap_or(asset_token_decimals(asset)))
+}
+
+fn asset_token_decimals(asset: &AssetDto) -> u8 {
+    match asset {
+        AssetDto::Native { decimals, .. } => *decimals,
+        AssetDto::Nep141 { decimals, .. } => *decimals,
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttemptInput {
+    origin_asset: String,
+    refund_to: String,
+    slippage_bps: Option<u32>,
+    customer_name: Option<String>,
+}
+
+pub async fn create_attempt(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Json(input): Json<AttemptInput>,
+) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+    enabled(&state)?;
+    let link = load_active_link(&state, &slug).await?;
+    link_accepts_new_payments(&link)?;
+    require_live_mode_network(&state, &link)?;
+    let network = state.config.network(link.network_id);
+    let contract_id = network.router_id.clone().ok_or_else(|| {
+        ApiError::unavailable("Cross-chain payments are unavailable on this network.")
+    })?;
+    let tokens = tokens(&state).await?;
+    let destination_asset = resolve_destination_asset(&tokens, &link.asset)?.to_owned();
+    let origin = origin_token(&tokens, input.origin_asset.trim())?;
+    let slippage_bps = input.slippage_bps.unwrap_or(DEFAULT_SLIPPAGE_BPS);
+    let refund_to = input.refund_to.trim().to_owned();
+    if refund_to.is_empty() || refund_to.len() > 255 {
+        return Err(ApiError::bad_request(
+            "A connected wallet address is required for cross-chain payments.",
+        ));
+    }
+    let params = QuoteParams {
+        origin_asset: origin.asset_id.clone(),
+        destination_asset: destination_asset.clone(),
+        amount_out: link.amount.clone(),
+        recipient: link.payout_account_id.clone(),
+        refund_to: refund_to.clone(),
+        refund_type: "ORIGIN_CHAIN",
+        slippage_bps,
+    };
+    let wet = if simulated(&state) {
+        let amount_in = mock_amount_in(
+            origin.decimals,
+            token_decimals(&tokens, &link.asset)?,
+            &link.amount,
+            slippage_bps,
+        )?;
+        let deadline = Utc::now() + chrono::Duration::seconds(QUOTE_TTL_SECONDS);
+        OneClickQuote {
+            deposit_address: Some(mock_deposit_address()),
+            deposit_memo: None,
+            min_amount_in: amount_in.clone(),
+            amount_in,
+            amount_out: link.amount.clone(),
+            deadline: Some(deadline.to_rfc3339()),
+            time_estimate_seconds: MOCK_SETTLE_DELAY_SECONDS,
+        }
+    } else {
+        live_quote(
+            &state,
+            &params,
+            false,
+            Utc::now().timestamp() + WET_QUOTE_REQUEST_DEADLINE_SECONDS,
+        )
+        .await?
+    };
+    let Some(deposit_address) = wet.deposit_address.clone() else {
+        return Err(ApiError::unavailable(
+            "1Click did not return a deposit address for the swap.",
+        ));
+    };
+    let deadline_seconds = wet
+        .deadline
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|time| time.timestamp())
+        .ok_or_else(|| ApiError::unavailable("1Click quote has no deadline."))?;
+    let attempt_id = format!("oc_{}", Uuid::new_v4().simple());
+    let order_id = format!("ord_{}", Uuid::new_v4().simple());
+    let order_key = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let customer_name = input
+        .customer_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let mut tx = state.pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO orders (order_id, merchant_id, payer_account_id, network_id, contract_id, order_key, \"authorization\", asset, amount, fee, net, source, link_slug, customer_name, pay_method) \
+         VALUES (?,?,?,?,?,?,?,?,?, '0', ?, '1click', ?, ?, 'cross_chain')",
+    )
+    .bind(&order_id)
+    .bind(&link.merchant_id)
+    .bind(&refund_to)
+    .bind(link.network_id.as_str())
+    .bind(&contract_id)
+    .bind(&order_key)
+    .bind(serde_json::to_value(&link.asset).map_err(|_| ApiError::internal())?)
+    .bind(&link.amount)
+    .bind(&link.amount)
+    .bind(&link.slug)
+    .bind(&customer_name)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO one_click_attempts (attempt_id, network_id, contract_id, order_id, merchant_id, link_slug, origin_asset, destination_asset, amount_out, amount_in, slippage_bps, refund_to, refund_chain, deposit_address, deposit_memo, deadline, status) \
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,to_timestamp(?),'AWAITING_DEPOSIT')",
+    )
+    .bind(&attempt_id)
+    .bind(link.network_id.as_str())
+    .bind(&contract_id)
+    .bind(&order_id)
+    .bind(&link.merchant_id)
+    .bind(&link.slug)
+    .bind(&origin.asset_id)
+    .bind(&destination_asset)
+    .bind(&link.amount)
+    .bind(&wet.amount_in)
+    .bind(i64::from(slippage_bps))
+    .bind(&refund_to)
+    .bind(&origin.blockchain)
+    .bind(&deposit_address)
+    .bind(&wet.deposit_memo)
+    .bind(i64::from(deadline_seconds))
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({
+            "attemptId": attempt_id,
+            "orderId": order_id,
+            "merchantId": link.merchant_id,
+            "amountIn": wet.amount_in,
+            "minAmountIn": wet.min_amount_in,
+            "depositAddress": deposit_address,
+            "depositMemo": wet.deposit_memo,
+            "deadlineSeconds": deadline_seconds,
+            "originDecimals": origin.decimals,
+            "simulated": simulated(&state),
+        })),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepositInput {
+    tx_hash: String,
+}
+
+pub async fn submit_deposit(
+    State(state): State<AppState>,
+    Path(attempt_id): Path<String>,
+    Json(input): Json<DepositInput>,
+) -> Result<Json<Value>, ApiError> {
+    enabled(&state)?;
+    let tx_hash = input.tx_hash.trim();
+    if tx_hash.is_empty() || tx_hash.len() > 255 {
+        return Err(ApiError::bad_request(
+            "A deposit transaction hash is required.",
+        ));
+    }
+    let mut tx = state.pool.begin().await?;
+    let attempt = sqlx::query(
+        "SELECT attempt_id, deposit_address, deposit_memo, status, deadline FROM one_click_attempts WHERE attempt_id=? FOR UPDATE",
+    )
+    .bind(&attempt_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Cross-chain payment attempt not found."))?;
+    let status: String = attempt.try_get("status")?;
+    if !OPEN_ATTEMPT_STATUSES.contains(&status.as_str()) {
+        return Err(ApiError::conflict(
+            "This cross-chain payment attempt is already closed. Start a new payment.",
+        ));
+    }
+    let deadline: chrono::DateTime<Utc> = attempt.try_get("deadline")?;
+    if deadline <= Utc::now() {
+        sqlx::query("UPDATE one_click_attempts SET status='EXPIRED', updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=?")
+            .bind(&attempt_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Err(ApiError::conflict(
+            "The swap quote expired. Start a new payment to get a fresh deposit address.",
+        ));
+    }
+    sqlx::query("UPDATE one_click_attempts SET tx_hash=?, status='PENDING_DEPOSIT', updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=?")
+        .bind(tx_hash)
+        .bind(&attempt_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    let deposit_address: String = attempt.try_get("deposit_address")?;
+    if !simulated(&state) {
+        let response = submit_deposit_tx(&state, &deposit_address, tx_hash).await?;
+        tracing::info!(
+            attempt_id,
+            provider_status = response.status.as_str(),
+            "1Click deposit submitted"
+        );
+    }
+    let (attempt_status, order_state) = read_attempt_state(&state, &attempt_id).await?;
+    Ok(Json(json!({
+        "attemptId": attempt_id,
+        "status": attempt_status,
+        "orderState": order_state,
+        "simulated": simulated(&state),
+    })))
+}
+
+pub async fn attempt_status(
+    State(state): State<AppState>,
+    Path(attempt_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    enabled(&state)?;
+    let (attempt_status, order_state, tx_hash, failure_reason) =
+        read_attempt_detail(&state, &attempt_id).await?;
+    Ok(Json(json!({
+        "attemptId": attempt_id,
+        "status": attempt_status,
+        "orderState": order_state,
+        "txHash": tx_hash,
+        "failureReason": failure_reason,
+        "simulated": simulated(&state),
+    })))
+}
+
+async fn read_attempt_state(
+    state: &AppState,
+    attempt_id: &str,
+) -> Result<(String, Option<String>), ApiError> {
+    let detail = read_attempt_detail(state, attempt_id).await?;
+    Ok((detail.0, detail.1))
+}
+
+async fn read_attempt_detail(
+    state: &AppState,
+    attempt_id: &str,
+) -> Result<(String, Option<String>, Option<String>, Option<String>), ApiError> {
+    let row = sqlx::query(
+        "SELECT a.status, a.tx_hash, a.failure_reason, o.state AS order_state \
+         FROM one_click_attempts a JOIN orders o ON o.network_id=a.network_id AND o.contract_id=a.contract_id AND o.order_id=a.order_id \
+         WHERE a.attempt_id=?",
+    )
+    .bind(attempt_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("Cross-chain payment attempt not found."))?;
+    Ok((
+        row.try_get("status")?,
+        row.try_get("order_state")?,
+        row.try_get("tx_hash")?,
+        row.try_get("failure_reason")?,
+    ))
 }
 
 #[cfg(test)]
@@ -682,5 +1221,64 @@ mod tests {
         assert!(parse_tokens(&json!({"not": "an array"})).is_err());
         assert!(parse_tokens(&json!([])).is_err());
         assert!(parse_tokens(&json!([{"assetId": "x", "decimals": 300}])).is_err());
+    }
+
+    #[test]
+    fn destination_assets_resolves_near_nep141_tokens_and_rejects_the_rest() {
+        let tokens = mock_tokens();
+        let usdc = AssetDto::Nep141 {
+            contract_id: "0xaf88d065e77c8cc2239327c5edb3a432268e5831".to_owned(),
+            symbol: "USDC".to_owned(),
+            decimals: 6,
+        };
+        assert_eq!(
+            resolve_destination_asset(&tokens, &usdc).unwrap(),
+            "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near"
+        );
+        let unknown = AssetDto::Nep141 {
+            contract_id: "usdc.fakes.testnet".to_owned(),
+            symbol: "USDC".to_owned(),
+            decimals: 6,
+        };
+        assert!(resolve_destination_asset(&tokens, &unknown).is_err());
+        let native = AssetDto::Native {
+            symbol: "NEAR".to_owned(),
+            decimals: 24,
+        };
+        let error = resolve_destination_asset(&tokens, &native).unwrap_err();
+        assert!(error.to_string().contains("NEP-141"));
+    }
+
+    #[test]
+    fn unknown_origin_assets_are_rejected() {
+        let tokens = mock_tokens();
+        assert!(origin_token(&tokens, "nep141:not-a-token").is_err());
+        assert!(origin_token(&tokens, "").is_err());
+        assert_eq!(
+            origin_token(&tokens, "nep141:wrap.near").unwrap().decimals,
+            24
+        );
+    }
+
+    #[test]
+    fn mock_amount_in_scales_decimals_and_applies_slippage_buffer() {
+        assert_eq!(mock_amount_in(6, 6, "1000000", 100).unwrap(), "1010000");
+        assert_eq!(mock_amount_in(9, 6, "1000000", 0).unwrap(), "1000000000");
+        assert_eq!(mock_amount_in(6, 9, "1000000000", 0).unwrap(), "1000000");
+        assert_eq!(
+            mock_amount_in(24, 24, "1000000000000000000000000", 300).unwrap(),
+            "1030000000000000000000000"
+        );
+        assert!(mock_amount_in(24, 24, "0", 0).is_err());
+    }
+
+    #[test]
+    fn mock_deposit_addresses_are_unique_and_evm_shaped() {
+        let first = mock_deposit_address();
+        let second = mock_deposit_address();
+        assert_ne!(first, second);
+        assert!(first.starts_with("0x"));
+        assert_eq!(first.len(), 42);
+        assert!(first[2..].bytes().all(|byte| byte.is_ascii_hexdigit()));
     }
 }

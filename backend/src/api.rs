@@ -61,6 +61,20 @@ pub fn routes() -> Router<AppState> {
         .route("/links", get(list_links).post(create_link))
         .route("/links/{slug}", get(get_link).delete(delete_link))
         .route("/links/{slug}/claim", post(claim_link))
+        .route("/oneclick/tokens", get(crate::oneclick::tokens_handler))
+        .route("/links/{slug}/oneclick/quote", post(crate::oneclick::quote))
+        .route(
+            "/links/{slug}/oneclick/attempts",
+            post(crate::oneclick::create_attempt),
+        )
+        .route(
+            "/oneclick/attempts/{attempt_id}/deposit",
+            post(crate::oneclick::submit_deposit),
+        )
+        .route(
+            "/oneclick/attempts/{attempt_id}",
+            get(crate::oneclick::attempt_status),
+        )
         .route("/orders/{merchant_id}/{order_id}", get(get_order))
         .route(
             "/orders/{merchant_id}/{order_id}/meta",

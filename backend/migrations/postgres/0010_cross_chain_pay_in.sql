@@ -1,4 +1,5 @@
 ALTER TABLE orders ADD COLUMN pay_method VARCHAR(16) NOT NULL DEFAULT 'native_near';
+ALTER TABLE orders ALTER COLUMN "authorization" DROP NOT NULL;
 ALTER TABLE orders DROP CONSTRAINT orders_source_ck;
 ALTER TABLE orders ADD CONSTRAINT orders_source_ck CHECK (source IN ('link','checkout','gateway','1click'));
 ALTER TABLE orders ADD CONSTRAINT orders_pay_method_ck CHECK (pay_method IN ('native_near','cross_chain'));
