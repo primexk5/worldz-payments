@@ -14,13 +14,43 @@ pub fn spawn_indexer_worker(state: AppState) {
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut backoff = crate::workers::Backoff::default();
+        let mut consecutive_failures = [0u32; 2];
         loop {
             interval.tick().await;
             let mut failed = false;
-            for network_id in [NetworkId::Testnet, NetworkId::Mainnet] {
-                if let Err(error) = index_network(&state, network_id).await {
-                    tracing::warn!(network = network_id.as_str(), error = %error, "NEAR indexer will retry");
-                    failed = true;
+            for (slot, network_id) in [NetworkId::Testnet, NetworkId::Mainnet]
+                .into_iter()
+                .enumerate()
+            {
+                match index_network(&state, network_id).await {
+                    Ok(()) => {
+                        if consecutive_failures[slot] > 0 {
+                            tracing::info!(
+                                network = network_id.as_str(),
+                                attempts = consecutive_failures[slot],
+                                "NEAR indexer recovered"
+                            );
+                            consecutive_failures[slot] = 0;
+                        }
+                    }
+                    Err(error) => {
+                        consecutive_failures[slot] = consecutive_failures[slot].saturating_add(1);
+                        if consecutive_failures[slot] == 1 {
+                            tracing::warn!(
+                                network = network_id.as_str(),
+                                error = %error,
+                                "NEAR indexer unavailable; retrying with backoff"
+                            );
+                        } else {
+                            tracing::debug!(
+                                network = network_id.as_str(),
+                                attempts = consecutive_failures[slot],
+                                error = %error,
+                                "NEAR indexer outage continues"
+                            );
+                        }
+                        failed = true;
+                    }
                 }
             }
             if failed {

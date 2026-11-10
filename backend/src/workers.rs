@@ -7,6 +7,9 @@ pub struct Backoff {
 
 impl Backoff {
     pub fn reset(&mut self) {
+        if self.failures > 0 {
+            tracing::info!(failures = self.failures, "background worker recovered");
+        }
         self.failures = 0;
     }
 
@@ -20,12 +23,21 @@ impl Backoff {
 
     pub async fn failed(&mut self, worker: &'static str) {
         let delay = self.next_delay();
-        tracing::error!(
-            worker,
-            failures = self.failures,
-            retry_seconds = delay.as_secs(),
-            "background worker failure; backing off"
-        );
+        if self.failures == 1 {
+            tracing::error!(
+                worker,
+                failures = self.failures,
+                retry_seconds = delay.as_secs(),
+                "background worker failure; backing off"
+            );
+        } else {
+            tracing::debug!(
+                worker,
+                failures = self.failures,
+                retry_seconds = delay.as_secs(),
+                "background worker still failing; backing off"
+            );
+        }
         tokio::time::sleep(delay).await;
     }
 }
