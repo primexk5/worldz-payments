@@ -68,21 +68,28 @@ export default function NigeriaServicesPage() {
   const needsCustomerNumber = category === "electricity" || category === "tv";
   const purchaseAmount = category === "data" || category === "tv" ? selectedVariation?.variation_amount ?? "" : amountNgn;
 
-  const loadPaymentTokens = useCallback(async () => {
+  const fetchPaymentTokens = useCallback(async () => {
     try {
       const assets = await nearApi.allowedAssets();
       const stable = assets.tokens.filter((token) => ["USDC", "USDT", "DAI"].includes(token.symbol.toUpperCase()));
-      setTokens(stable);
-      setAssetError(null);
-      setTokenContract((current) => current === "native:NEAR" || stable.some((token) => token.contractId === current)
-        ? current : "native:NEAR");
       const missing = ["USDC", "USDT"].filter((symbol) => !stable.some((token) => token.symbol.toUpperCase() === symbol));
-      if (missing.length) setAssetError(`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not enabled or available on this testnet. Check the backend and router token allowlists.`);
+      return { stable, missing, error: null as string | null };
     } catch (cause) {
-      setTokens([]);
-      setAssetError(`Could not load USDC and USDT: ${providerError(cause)}`);
+      return { stable: [] as AllowedFungibleToken[], missing: ["USDC", "USDT"], error: `Could not load USDC and USDT: ${providerError(cause)}` };
     }
   }, []);
+
+  const applyPaymentTokens = useCallback((result: { stable: AllowedFungibleToken[]; missing: string[]; error: string | null }) => {
+    setTokens(result.stable);
+    setTokenContract((current) => current === "native:NEAR" || result.stable.some((token) => token.contractId === current) ? current : "native:NEAR");
+    if (result.error || result.missing.length) {
+      setAssetError(result.error ?? `${result.missing.join(" and ")} ${result.missing.length === 1 ? "is" : "are"} not enabled or available on this testnet. Check the backend and router token allowlists.`);
+    } else {
+      setAssetError(null);
+    }
+  }, []);
+
+  const loadPaymentTokens = () => void fetchPaymentTokens().then((result) => applyPaymentTokens(result)).catch((cause) => { setTokens([]); setAssetError(`Could not load USDC and USDT: ${providerError(cause)}`); });
 
   useEffect(() => {
     const raw = window.sessionStorage.getItem(CHECKOUT_KEY);
@@ -147,7 +154,11 @@ export default function NigeriaServicesPage() {
     return () => { active = false; };
   }, [category]);
 
-  useEffect(() => { void loadPaymentTokens(); }, [loadPaymentTokens]);
+  useEffect(() => {
+    let active = true;
+    void fetchPaymentTokens().then((result) => { if (active) applyPaymentTokens(result); }).catch(() => { if (active) { setTokens([]); setAssetError("Could not load USDC and USDT."); } });
+    return () => { active = false; };
+  }, [fetchPaymentTokens, applyPaymentTokens]);
 
   useEffect(() => {
     if (!serviceId || (category !== "data" && category !== "tv")) return;
