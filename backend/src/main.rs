@@ -7,6 +7,7 @@ mod error;
 mod indexer;
 mod models;
 mod near_rpc;
+mod oneclick;
 mod orders;
 #[cfg(test)]
 mod security_tests;

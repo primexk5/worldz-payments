@@ -42,6 +42,11 @@ pub struct AppConfig {
     pub vtpass_public_key: Option<String>,
     pub vtpass_secret_key: Option<String>,
     pub vtpass_data_encryption_key: Option<[u8; 32]>,
+    pub oneclick_enabled: bool,
+    pub oneclick_mode: String,
+    pub oneclick_base_url: String,
+    pub oneclick_api_key: Option<String>,
+    pub oneclick_mock_outcome: Option<String>,
     pub testnet: NetworkConfig,
     pub mainnet: NetworkConfig,
 }
@@ -116,6 +121,12 @@ impl AppConfig {
                     })
                 })
                 .transpose()?,
+            oneclick_enabled: parse("ONECLICK_ENABLED", false)?,
+            oneclick_mode: value("ONECLICK_MODE", "live").to_ascii_lowercase(),
+            oneclick_base_url: value("ONECLICK_BASE_URL", "https://1click.chaindefuser.com"),
+            oneclick_api_key: optional("ONECLICK_API_KEY"),
+            oneclick_mock_outcome: optional("ONECLICK_MOCK_OUTCOME")
+                .map(|outcome| outcome.to_ascii_lowercase()),
             testnet,
             mainnet,
         };
@@ -164,6 +175,39 @@ impl AppConfig {
             || config.shopify_app_url.is_some()
             || config.shopify_checkout_url.is_some()
             || config.shopify_token_encryption_key.is_some();
+        if config.oneclick_enabled {
+            if config.oneclick_mode != "mock" && config.oneclick_mode != "live" {
+                return Err(ApiError::configuration(
+                    "ONECLICK_MODE must be either mock or live",
+                ));
+            }
+            let parsed = url::Url::parse(&config.oneclick_base_url)
+                .map_err(|_| ApiError::configuration("ONECLICK_BASE_URL is invalid"))?;
+            if parsed.scheme() != "https" || parsed.host_str().is_none() {
+                return Err(ApiError::configuration(
+                    "ONECLICK_BASE_URL must be an HTTPS URL",
+                ));
+            }
+            if let Some(outcome) = config.oneclick_mock_outcome.as_deref() {
+                if config.oneclick_mode != "mock" {
+                    return Err(ApiError::configuration(
+                        "ONECLICK_MOCK_OUTCOME is only valid when ONECLICK_MODE=mock",
+                    ));
+                }
+                if !matches!(
+                    outcome,
+                    "success" | "refunded" | "failed" | "incomplete_deposit"
+                ) {
+                    return Err(ApiError::configuration(
+                        "ONECLICK_MOCK_OUTCOME must be one of success, refunded, failed, incomplete_deposit",
+                    ));
+                }
+            }
+        } else if config.oneclick_mode != "live" || config.oneclick_api_key.is_some() {
+            return Err(ApiError::configuration(
+                "ONECLICK_MODE and ONECLICK_API_KEY require ONECLICK_ENABLED=true",
+            ));
+        }
         if shopify_configured
             && (config.shopify_api_key.is_none()
                 || config.shopify_api_secret.is_none()

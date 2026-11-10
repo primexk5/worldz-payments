@@ -144,6 +144,11 @@ fn config(database_url: String) -> AppConfig {
         vtpass_public_key: None,
         vtpass_secret_key: None,
         vtpass_data_encryption_key: None,
+        oneclick_enabled: false,
+        oneclick_mode: "live".into(),
+        oneclick_base_url: "https://1click.chaindefuser.com".into(),
+        oneclick_api_key: None,
+        oneclick_mock_outcome: None,
         testnet: network.clone(),
         mainnet: network,
     }

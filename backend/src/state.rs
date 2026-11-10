@@ -24,6 +24,12 @@ pub struct CachedNearUsdRate {
 }
 
 #[derive(Clone)]
+pub struct CachedOneClickTokens {
+    pub tokens: Arc<Vec<crate::oneclick::OneClickToken>>,
+    pub fetched_at: Instant,
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
     pub config: Arc<AppConfig>,
@@ -32,6 +38,7 @@ pub struct AppState {
     pub public_requests: Arc<tokio::sync::Semaphore>,
     pub usd_ngn_rate: Arc<tokio::sync::Mutex<Option<CachedUsdNgnRate>>>,
     pub near_usd_rate: Arc<tokio::sync::Mutex<Option<CachedNearUsdRate>>>,
+    pub oneclick_tokens: Arc<tokio::sync::Mutex<Option<CachedOneClickTokens>>>,
 }
 
 impl AppState {
@@ -43,6 +50,7 @@ impl AppState {
             public_requests: Arc::new(tokio::sync::Semaphore::new(32)),
             usd_ngn_rate: Arc::new(tokio::sync::Mutex::new(None)),
             near_usd_rate: Arc::new(tokio::sync::Mutex::new(None)),
+            oneclick_tokens: Arc::new(tokio::sync::Mutex::new(None)),
             http: Client::builder()
                 .timeout(std::time::Duration::from_secs(12))
                 .user_agent("WorldzPayments-NEAR-API/1.0")
