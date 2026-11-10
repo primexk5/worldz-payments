@@ -862,7 +862,7 @@ pub async fn fulfill_purchase(
 ) -> Result<Json<Value>, ApiError> {
     configured(&state)?;
     let mut tx = state.pool.begin().await?;
-    let row = sqlx::query("SELECT p.*, l.network_id FROM vtpass_service_purchases p JOIN payment_links l USING(link_slug) WHERE p.purchase_id=? FOR UPDATE")
+    let row = sqlx::query("SELECT p.*, l.network_id FROM vtpass_service_purchases p JOIN payment_links l ON l.slug = p.link_slug WHERE p.purchase_id=? FOR UPDATE")
         .bind(&purchase_id).fetch_optional(&mut *tx).await?
         .ok_or_else(|| ApiError::not_found("VTpass purchase not found."))?;
     let state_name: String = row.try_get("state")?;
