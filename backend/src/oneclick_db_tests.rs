@@ -383,15 +383,53 @@ async fn mock_lifecycle_runs_the_real_settlement_path_and_never_reuses_deposit_a
         &json!({
             "originAsset": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
             "refundTo": "0x2527d02599ba641c19fea793cd0f167589a0f10d",
-            "slippageBps": 100
+            "slippageBps": 100,
+            "customerName": "Checkout regression"
         }),
     )
     .await;
-    assert_eq!(code, StatusCode::CREATED);
+    assert_eq!(
+        code,
+        StatusCode::CREATED,
+        "attempt creation failed: {attempt}"
+    );
     assert_eq!(attempt["simulated"], true);
     let deposit_address = attempt["depositAddress"].as_str().unwrap().to_owned();
     let attempt_id = attempt["attemptId"].as_str().unwrap().to_owned();
     let order_id = attempt["orderId"].as_str().unwrap().to_owned();
+    let order = sqlx::query("SELECT asset, amount, fee, net, \"authorization\", customer_name, pay_method FROM orders WHERE order_id=$1")
+        .bind(&order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(order.try_get::<Value, _>("asset").unwrap()["symbol"], "TKN");
+    assert_eq!(order.try_get::<String, _>("amount").unwrap(), "1000000");
+    assert_eq!(order.try_get::<String, _>("fee").unwrap(), "0");
+    assert_eq!(order.try_get::<String, _>("net").unwrap(), "1000000");
+    assert!(order
+        .try_get::<Option<Value>, _>("authorization")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        order.try_get::<String, _>("customer_name").unwrap(),
+        "Checkout regression"
+    );
+    assert_eq!(
+        order.try_get::<String, _>("pay_method").unwrap(),
+        "cross_chain"
+    );
+    let persisted_attempt = attempt_row(&pool, &order_id).await;
+    assert_eq!(
+        persisted_attempt.try_get::<String, _>("status").unwrap(),
+        "AWAITING_DEPOSIT"
+    );
+    assert_eq!(
+        persisted_attempt
+            .try_get::<String, _>("deposit_address")
+            .unwrap(),
+        deposit_address
+    );
+
     let (code, _) = call(
         &app,
         "POST",

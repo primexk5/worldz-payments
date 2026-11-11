@@ -830,7 +830,7 @@ pub async fn create_attempt(
     let mut tx = state.pool.begin().await?;
     sqlx::query(
         "INSERT INTO orders (order_id, merchant_id, payer_account_id, network_id, contract_id, order_key, \"authorization\", asset, amount, fee, net, source, link_slug, customer_name, pay_method) \
-         VALUES (?,?,?,?,?,?,?,?,?, '0', ?, '1click', ?, ?, 'cross_chain')",
+         VALUES (?,?,?,?,?,?,NULL,?,?, '0', ?, '1click', ?, ?, 'cross_chain')",
     )
     .bind(&order_id)
     .bind(&link.merchant_id)
@@ -847,7 +847,7 @@ pub async fn create_attempt(
     .await?;
     sqlx::query(
         "INSERT INTO one_click_attempts (attempt_id, network_id, contract_id, order_id, merchant_id, link_slug, origin_asset, destination_asset, amount_out, amount_in, slippage_bps, refund_to, refund_chain, deposit_address, deposit_memo, deadline, status) \
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,to_timestamp(?),'AWAITING_DEPOSIT')",
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,to_timestamp(?),'AWAITING_DEPOSIT')",
     )
     .bind(&attempt_id)
     .bind(link.network_id.as_str())

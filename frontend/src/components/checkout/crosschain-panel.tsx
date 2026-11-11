@@ -218,9 +218,9 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
       )}
       {state === "quoted" && quote && wallet && (
         <div className="mt-4 rounded-xl bg-paper p-4">
-          <div className="flex justify-between gap-3 text-xs"><span className="text-mist">You send</span><span className="font-mono">≈ {formatAssetAmount(quote.amountIn, originAssetOf(origin!))} {origin?.symbol}</span></div>
-          <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Minimum accepted</span><span className="font-mono">{formatAssetAmount(quote.minAmountIn, originAssetOf(origin!))} {origin?.symbol}</span></div>
-          <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Merchant receives</span><span className="font-mono">{formatAssetAmount(quote.amountOut, link.asset)} {link.asset.symbol} on NEAR</span></div>
+          <div className="flex justify-between gap-3 text-xs"><span className="text-mist">You send</span><span className="font-mono">≈ {formatAssetAmount(quote.amountIn, originAssetOf(origin!))}</span></div>
+          <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Minimum accepted</span><span className="font-mono">{formatAssetAmount(quote.minAmountIn, originAssetOf(origin!))}</span></div>
+          <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Merchant receives</span><span className="font-mono">{formatAssetAmount(quote.amountOut, link.asset)} on NEAR</span></div>
           <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Estimated time</span><span className="font-mono">~{quote.timeEstimateSeconds}s</span></div>
           <button onClick={() => void startPayment()} disabled={busy} className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin" /> : <ArrowRight size={14} />}Start cross-chain payment</button>
           <button onClick={() => { setState("choose"); setQuote(null); }} className="mt-2 w-full text-center text-[11px] text-mist underline">Back</button>
@@ -230,7 +230,7 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
         <div className="mt-4 rounded-xl bg-paper p-4">
           <p className="font-mono text-[10px] uppercase tracking-[.12em] text-mist">Deposit address</p>
           <p className="mt-1 break-all font-mono text-xs">{attempt.depositAddress}</p>
-          <p className="mt-2 text-xs leading-5 text-ink/70">Send exactly {formatAssetAmount(attempt.amountIn, originAssetOf(origin!))} {origin?.symbol} to this address within {minutesLeft} minutes. If the swap fails, funds are refunded to your wallet.</p>
+          <p className="mt-2 text-xs leading-5 text-ink/70">Send exactly {formatAssetAmount(attempt.amountIn, originAssetOf(origin!))} to this address within {minutesLeft} minutes. If the swap fails, funds are refunded to your wallet.</p>
           {state === "depositing" && (
             attempt.simulated
               ? <button onClick={() => void sendDeposit()} disabled={busy} className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={14} />}Simulate deposit</button>
