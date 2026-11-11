@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateFee, calculateNet, formatUnitsExact, parseUnitsExact } from "./amounts.ts";
+import { calculateFee, calculateNet, formatUnitsExact, formatUnitsDisplay, parseUnitsExact } from "./amounts.ts";
 import { isVerifiedSettlement } from "./order-state.ts";
 
 test("native NEAR conversion preserves all 24 decimal places", () => {
@@ -41,4 +41,16 @@ test("only a SETTLED state with a verified settlement receipt counts as settled"
   assert.equal(isVerifiedSettlement({ state: "SETTLED" }), false);
   assert.equal(isVerifiedSettlement({ state: "PROCESSING", settlementReceiptId: "receipt-1" }), false);
   assert.equal(isVerifiedSettlement({ state: "PAYOUT_RETRYABLE", settlementReceiptId: "receipt-1" }), false);
+});
+
+test("dashboard amounts stay readable without changing exact token values", () => {
+  const amount = "6606989439063245628732118";
+  assert.equal(formatUnitsDisplay(amount, 24), "≈ 6.607");
+  assert.equal(formatUnitsExact(amount, 24), "6.606989439063245628732118");
+  assert.equal(formatUnitsDisplay("2000000", 6), "2");
+  assert.equal(formatUnitsDisplay("1", 24), "<0.0001");
+  assert.equal(formatUnitsDisplay("999999999999999999999999", 24), "≈ 1");
+  assert.equal(formatUnitsDisplay("1234567890123456789000000", 6), "1,234,567,890,123,456,789");
+  assert.equal(formatUnitsDisplay("123", 0), "123");
+  assert.equal(formatUnitsDisplay("0", 24), "0");
 });

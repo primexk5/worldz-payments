@@ -27,6 +27,20 @@ export function formatUnitsExact(value: string | bigint, decimals: number, maxFr
   return trimmedFraction ? `${whole}.${trimmedFraction}` : whole.toString();
 }
 
+/** Readable token amounts for summaries; exact values remain available in payment details. */
+export function formatUnitsDisplay(value: string | bigint, decimals: number): string {
+  const exact = formatUnitsExact(value, decimals);
+  const places = Math.min(decimals, 4);
+  const amount = BigInt(value);
+  const scale = 10n ** BigInt(decimals - places);
+  const rounded = (amount + scale / 2n) / scale;
+  if (amount > 0n && rounded === 0n) return `<0.${"0".repeat(places - 1)}1`;
+  const readable = formatUnitsExact(rounded, places);
+  const [whole, fraction] = readable.split(".");
+  const grouped = BigInt(whole!).toLocaleString("en-US");
+  return `${readable === exact ? "" : "≈ "}${grouped}${fraction ? `.${fraction}` : ""}`;
+}
+
 export function calculateFee(amount: string, feeBps: number): string {
   if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 500) {
     throw new Error("The fee rate is outside the supported range.");
