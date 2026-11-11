@@ -13,6 +13,7 @@ import type {
   OrderStatus,
   PaymentLink,
 } from "./types";
+import type { AttemptStatus, OneClickAttempt, OneClickQuote, OneClickToken } from "@/lib/crosschain/types";
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
@@ -131,6 +132,21 @@ export const nearApi = {
   },
   link(slug: string) {
     return request<PaymentLink>(`/links/${encodeURIComponent(slug)}`);
+  },
+  oneclickTokens() {
+    return request<{ mode: string; tokens: OneClickToken[] }>("/oneclick/tokens", { cache: "no-store" });
+  },
+  oneclickQuote(slug: string, input: { originAsset: string; refundTo: string; slippageBps?: number }) {
+    return request<OneClickQuote>(`/links/${encodeURIComponent(slug)}/oneclick/quote`, { method: "POST", body: body(input) });
+  },
+  oneclickCreateAttempt(slug: string, input: { originAsset: string; refundTo: string; slippageBps?: number }) {
+    return request<OneClickAttempt>(`/links/${encodeURIComponent(slug)}/oneclick/attempts`, { method: "POST", body: body(input) });
+  },
+  oneclickSubmitDeposit(attemptId: string, txHash: string) {
+    return request<{ attemptId: string; status: string; orderState: string | null; simulated: boolean }>(`/oneclick/attempts/${encodeURIComponent(attemptId)}/deposit`, { method: "POST", body: body({ txHash }) });
+  },
+  oneclickAttempt(attemptId: string) {
+    return request<AttemptStatus>(`/oneclick/attempts/${encodeURIComponent(attemptId)}`, { cache: "no-store" });
   },
   async claimLink(slug: string, payerAccountId: string, customerName: string | undefined, proof: {message:string;nonce:string;state:string;publicKey:string;signature:string}) {
     const claim = await request<LinkClaim>(`/links/${encodeURIComponent(slug)}/claim`, {
