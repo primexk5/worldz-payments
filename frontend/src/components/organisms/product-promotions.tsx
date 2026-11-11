@@ -71,11 +71,10 @@ export function PaymentLinksPromotion() {
     <section id="payment-links" className="site-container site-section">
       <div className="mb-10 flex flex-wrap items-center justify-between gap-4 pb-5"><MonoLabel>02 / For wherever you sell</MonoLabel><span className="flex items-center gap-2 text-xs text-ink/60"><Link2 size={15}/>Payment links</span></div>
       <div className="grid items-center gap-12 lg:grid-cols-[1.1fr_.9fr] lg:gap-16">
-        <div className="relative order-2 overflow-hidden rounded-[28px] bg-vault p-6 sm:p-10 lg:order-1">
-          <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,#167354,transparent_75%)]"/>
+        <div className="relative order-2 overflow-hidden rounded-[28px] bg-[#f1eee6] p-6 sm:p-10 lg:order-1">
           <div className="relative mx-auto max-w-[370px]">
-            <div className="mb-5 flex items-center justify-between font-mono text-[9px] uppercase tracking-widest text-white/60"><span>One link. Ready to share.</span><span>Preview</span></div>
-            <div className="rounded-2xl bg-[#fffefa] p-6 shadow-xl sm:p-7">
+            <div className="mb-5 flex items-center justify-between font-mono text-[9px] uppercase tracking-widest text-ink/45"><span>One link. Ready to share.</span><span>Preview</span></div>
+            <div className="rounded-2xl bg-white p-6 shadow-[0_12px_35px_-24px_rgba(11,15,14,.35)] sm:p-7">
               <div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl border border-line bg-paper"><ShoppingBag size={18}/></span><div><p className="text-sm font-semibold">Studio North</p><p className="mt-1 text-[11px] text-ink/50">Design deposit</p></div></div>
               <p className="mt-8 text-xs text-ink/55">Amount to pay</p><p className="mt-2 font-mono text-4xl tracking-[-.06em]">25.00 <span className="text-base tracking-normal text-ink/50">NEAR</span></p>
               <div className="my-6 h-px bg-ink/10"/>
@@ -83,7 +82,7 @@ export function PaymentLinksPromotion() {
               <div className="mt-5 flex h-11 items-center justify-center gap-2 rounded-lg bg-ink text-xs font-medium text-white"><Wallet size={14}/>Connect wallet to pay</div>
               <p className="mt-3 text-center text-[10px] text-ink/50">Review the amount and fees before signing.</p>
             </div>
-            <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-white"><Link2 size={15} className="shrink-0 text-signal"/><span className="min-w-0 flex-1 truncate font-mono text-[11px]">your-domain.com/pay/your-link</span><span className="rounded border border-white/20 px-2 py-1 text-[9px] text-white/65">URL preview</span></div>
+            <div className="mt-4 flex items-center gap-3 rounded-xl border border-ink/10 bg-white/60 px-4 py-3 text-ink/75"><Link2 size={15} className="shrink-0 text-signal"/><span className="min-w-0 flex-1 truncate font-mono text-[11px]">your-domain.com/pay/your-link</span><span className="rounded bg-paper px-2 py-1 text-[9px] text-ink/50">URL preview</span></div>
           </div>
         </div>
         <div className="order-1 lg:order-2"><span className="mb-5 inline-flex rounded-full border border-line bg-white/50 px-3 py-1.5 text-[10px] font-medium">No storefront required</span><h2 className="site-heading">A payment link.<br/>A world of <em className="font-serif font-normal italic text-green-deep">possibility.</em></h2><p className="site-description mt-5 max-w-md">From a client deposit to your next social sale. Set your amount, create a link and give customers a clear way to pay from their NEAR wallet.</p>
