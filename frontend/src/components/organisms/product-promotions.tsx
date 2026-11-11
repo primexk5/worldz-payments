@@ -6,13 +6,13 @@ import { ShopifyLogo } from "@/components/atoms/shopify-logo";
 import { IntegrationCode } from "@/components/organisms/integration-code";
 
 const actionClass = "inline-flex min-h-12 items-center justify-center gap-3 rounded-full bg-ink px-6 text-xs font-medium text-paper transition hover:bg-vault";
-const textActionClass = "inline-flex min-h-12 items-center gap-2 text-xs font-medium underline-offset-4 hover:underline";
+const textActionClass = "inline-flex min-h-12 items-center gap-2 text-xs font-medium transition-colors hover:text-green-deep";
 
 export function ShopifyPromotion() {
   return (
-    <section id="shopify" className="overflow-hidden border-y border-line bg-white/45">
+    <section id="shopify" className="overflow-hidden bg-white/45">
       <div className="site-container site-section">
-        <div className="mb-10 flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5">
+        <div className="mb-10 flex flex-wrap items-center justify-between gap-4 pb-5">
           <MonoLabel>01 / For your storefront</MonoLabel>
           <span className="text-xs text-ink/60">Shopify × WorldzPayments</span>
         </div>
@@ -37,7 +37,7 @@ export function ShopifyPromotion() {
           </div>
           <div className="relative isolate overflow-hidden rounded-[28px] bg-[#092f26] p-5 sm:p-9">
             <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 -z-10 size-80 rounded-full border-[48px] border-[#95bf47]/10"/>
-            <div className="flex items-center justify-between gap-3 border-b border-white/15 pb-5">
+            <div className="flex items-center justify-between gap-3 pb-5">
               <span className="font-mono text-[10px] uppercase tracking-[.16em] text-white/65">Your next way to get paid</span>
               <span className="rounded-full border border-white/20 px-2.5 py-1 text-[9px] text-white/65">Integration preview</span>
             </div>
@@ -56,7 +56,7 @@ export function ShopifyPromotion() {
               <div className="flex items-center justify-between gap-3"><span className="text-xs font-medium">Your store checkout</span><span className="font-mono text-[9px] uppercase tracking-wider text-ink/45">Example order</span></div>
               <div className="my-5 flex flex-wrap items-end justify-between gap-3"><div><p className="text-[11px] text-ink/55">Total to pay</p><p className="mt-1 font-mono text-3xl tracking-[-.06em]">25.00 <span className="text-sm tracking-normal text-ink/55">NEAR</span></p></div><span className="mb-1 flex items-center gap-1.5 text-[10px] text-ink/55"><LockKeyhole size={11}/>Wallet checkout</span></div>
               <div className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-vault px-4 text-xs font-medium text-white"><NearLogo className="size-3.5"/>Pay with NEAR<ArrowUpRight className="ml-auto size-3.5"/></div>
-              <div className="mt-4 flex items-center gap-2 border-t border-line/60 pt-4"><span className="grid size-5 shrink-0 place-items-center rounded-full bg-[#95bf47]/20 text-vault"><Check size={12}/></span><p className="text-[11px] text-ink/65">Payment verified. Order synced to Shopify.</p></div>
+              <div className="mt-4 flex items-center gap-2 pt-4"><span className="grid size-5 shrink-0 place-items-center rounded-full bg-[#95bf47]/20 text-vault"><Check size={12}/></span><p className="text-[11px] text-ink/65">Payment verified. Order synced to Shopify.</p></div>
             </div>
             <p className="mt-5 text-center text-[10px] leading-5 text-white/50">From product page to wallet payment to Shopify order.</p>
           </div>
@@ -69,7 +69,7 @@ export function ShopifyPromotion() {
 export function PaymentLinksPromotion() {
   return (
     <section id="payment-links" className="site-container site-section">
-      <div className="mb-10 flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5"><MonoLabel>02 / For wherever you sell</MonoLabel><span className="flex items-center gap-2 text-xs text-ink/60"><Link2 size={15}/>Payment links</span></div>
+      <div className="mb-10 flex flex-wrap items-center justify-between gap-4 pb-5"><MonoLabel>02 / For wherever you sell</MonoLabel><span className="flex items-center gap-2 text-xs text-ink/60"><Link2 size={15}/>Payment links</span></div>
       <div className="grid items-center gap-12 lg:grid-cols-[1.1fr_.9fr] lg:gap-16">
         <div className="relative order-2 overflow-hidden rounded-[28px] bg-vault p-6 sm:p-10 lg:order-1">
           <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,#167354,transparent_75%)]"/>
@@ -87,7 +87,7 @@ export function PaymentLinksPromotion() {
           </div>
         </div>
         <div className="order-1 lg:order-2"><span className="mb-5 inline-flex rounded-full border border-line bg-white/50 px-3 py-1.5 text-[10px] font-medium">No storefront required</span><h2 className="site-heading">A payment link.<br/>A world of <em className="font-serif font-normal italic text-green-deep">possibility.</em></h2><p className="site-description mt-5 max-w-md">From a client deposit to your next social sale. Set your amount, create a link and give customers a clear way to pay from their NEAR wallet.</p>
-          <div className="mt-7 grid grid-cols-3 gap-3 border-y border-line py-5">{[["01", "Create a link"], ["02", "Share it anywhere"], ["03", "Track settlement"]].map(([number, title]) => <div key={number}><span className="font-mono text-[10px] text-green-deep">{number}</span><p className="mt-2 text-xs leading-5 font-medium">{title}</p></div>)}</div>
+          <div className="mt-7 grid grid-cols-3 gap-3 py-5">{[["01", "Create a link"], ["02", "Share it anywhere"], ["03", "Track settlement"]].map(([number, title]) => <div key={number}><span className="font-mono text-[10px] text-green-deep">{number}</span><p className="mt-2 text-xs leading-5 font-medium">{title}</p></div>)}</div>
           <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-2"><Link href="/dashboard/links" className={actionClass}>Create a payment link<ArrowUpRight size={16}/></Link><Link href="/checkout/demo" className={textActionClass}>Watch the demo<ArrowRight size={15}/></Link></div>
         </div>
       </div>
@@ -97,16 +97,16 @@ export function PaymentLinksPromotion() {
 
 export function DeveloperPromotion() {
   return (
-    <section id="docs" className="border-y border-line bg-white/40">
+    <section id="docs" className="bg-white/40">
       <div className="site-container site-section">
-        <div className="mb-10 flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5"><MonoLabel>05 / For what you’re building</MonoLabel><span className="flex items-center gap-2 text-xs text-ink/60"><Code2 size={15}/>SDK & developer tools</span></div>
+        <div className="mb-10 flex flex-wrap items-center justify-between gap-4 pb-5"><MonoLabel>05 / For what you’re building</MonoLabel><span className="flex items-center gap-2 text-xs text-ink/60"><Code2 size={15}/>SDK & developer tools</span></div>
         <div className="grid items-center gap-12 lg:grid-cols-[.9fr_1.1fr] lg:gap-16">
           <div><h2 className="site-heading">Your product.<br/>Our payment <em className="font-serif font-normal italic text-green-deep">primitives.</em></h2><p className="site-description mt-5 max-w-md">Build a payment experience that fits your business. Start with the TypeScript source client, connect your checkout and follow each payment through to verified settlement.</p>
             <div className="mt-7 space-y-4">{[["TypeScript source client", "Payment links, order status and receipt metadata."], ["Wallet & payment helpers", "Wallet sign-in, exact amounts and settlement checks."], ["REST API reference", "Documented requests for your own integration."]].map(([title, text]) => <div key={title} className="flex gap-3"><Check className="mt-0.5 size-4 shrink-0 text-green-deep"/><div><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-ink/60">{text}</p></div></div>)}</div>
             <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2"><Link href="/docs#typescript-client" className={actionClass}>Explore the SDK guide<ArrowUpRight size={16}/></Link><Link href="/docs#api-reference" className={textActionClass}>API reference<ArrowRight size={15}/></Link></div>
             <p className="mt-5 text-xs leading-6 text-ink/55">Included in this project as source. No standalone npm package.</p>
           </div>
-          <div className="min-w-0"><IntegrationCode/><div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-1 text-[10px] text-ink/55"><span className="flex items-center gap-1.5"><LockKeyhole size={12}/>Authenticated merchant session required</span><Link href="/docs#authentication" className="inline-flex items-center gap-1 underline-offset-4 hover:underline">Authentication guide<ArrowUpRight size={12}/></Link></div></div>
+          <div className="min-w-0"><IntegrationCode/><div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-1 text-[10px] text-ink/55"><span className="flex items-center gap-1.5"><LockKeyhole size={12}/>Authenticated merchant session required</span><Link href="/docs#authentication" className="inline-flex items-center gap-1 transition-colors hover:text-green-deep">Authentication guide<ArrowUpRight size={12}/></Link></div></div>
         </div>
       </div>
     </section>

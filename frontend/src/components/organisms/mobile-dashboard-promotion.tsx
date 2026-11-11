@@ -59,7 +59,7 @@ function IPhoneDashboard() {
 }
 
 export function MobileDashboardPromotion() {
-  return <section id="mobile-dashboard" aria-labelledby="mobile-dashboard-heading" className="overflow-hidden border-y border-line bg-[#e9ece4]">
+  return <section id="mobile-dashboard" aria-labelledby="mobile-dashboard-heading" className="overflow-hidden bg-[#e9ece4]">
     <div className="site-container site-section grid items-center gap-12 lg:grid-cols-[1fr_1fr] lg:gap-20">
       <div className="max-w-lg">
         <MonoLabel>Your workspace, wherever business happens</MonoLabel>
@@ -71,7 +71,7 @@ export function MobileDashboardPromotion() {
           { icon: Activity, title: "A clear view of every payment", text: "Search orders and follow their settlement status." },
           { icon: ReceiptText, title: "The proof, right at hand", text: "Open and download receipts for verified payments." },
         ].map(({ icon: Icon, title, text }) => <li key={title} className="flex items-start gap-4"><span className="grid size-10 shrink-0 place-items-center rounded-xl border border-vault/10 bg-white/55 text-vault"><Icon size={18}/></span><div><h3 className="text-sm font-semibold">{title}</h3><p className="mt-1.5 text-xs leading-6 text-ink/55">{text}</p></div></li>)}</ul>
-        <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-3"><Link href="/dashboard" className="inline-flex min-h-12 items-center justify-center gap-3 rounded-full bg-vault px-6 text-xs font-medium text-white transition-colors hover:bg-ink">Open your dashboard<ArrowUpRight size={16}/></Link><Link href="/onboarding" className="inline-flex min-h-12 items-center gap-2 text-xs font-medium text-vault underline-offset-4 hover:underline">Create an account<ArrowRight size={14}/></Link></div>
+        <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-3"><Link href="/dashboard" className="inline-flex min-h-12 items-center justify-center gap-3 rounded-full bg-vault px-6 text-xs font-medium text-white transition-colors hover:bg-ink">Open your dashboard<ArrowUpRight size={16}/></Link><Link href="/onboarding" className="inline-flex min-h-12 items-center gap-2 text-xs font-medium text-vault transition-colors hover:text-green-deep">Create an account<ArrowRight size={14}/></Link></div>
       </div>
       <div className={styles.visual}><span className={styles.orbitOne} aria-hidden="true"/><span className={styles.orbitTwo} aria-hidden="true"/><IPhoneDashboard/></div>
     </div>
