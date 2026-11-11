@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Activity, AlertCircle, ArrowDownLeft, ArrowUpRight, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Clock3, CreditCard, Link2, RefreshCw, Search, X } from "lucide-react";
+import { Activity, AlertCircle, ArrowUpRight, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Clock3, CreditCard, Link2, RefreshCw, Search, X } from "lucide-react";
 import { MonoLabel } from "@/components/atoms/mono-label";
 import { TokenLogo } from "@/components/atoms/token-logo";
 import { ChoiceSelect, type SelectOption } from "@/components/molecules/choice-select";
 import { NearReceipt } from "@/components/checkout/near-receipt";
 import { nearApi } from "@/lib/near/api";
 import { NEAR_EXPLORER_URL } from "@/lib/near/config";
-import { formatUnitsDisplay } from "@/lib/near/amounts";
+import { SettledVolumeCard } from "@/components/dashboard/settled-volume-card";
 import { formatAssetAmount } from "@/lib/near/tokens";
 import type { AllowedFungibleToken, DashboardDelivery, OrderState } from "@/lib/near/types";
 import { isVerifiedSettlement } from "@/lib/near/order-state";
@@ -56,11 +56,11 @@ export default function PaymentsPage() {
   }).sort((a, b) => b.timestampMs - a.timestampMs), [deliveries, filter, query]);
   const summary = useMemo(() => {
     const settled = deliveries.filter(isVerifiedSettlement);
-    const totals = new Map<string, { amount: bigint; asset: DashboardDelivery["asset"] }>();
+    const totals = new Map<string, { amount: bigint; asset: DashboardDelivery["asset"]; networkId: DashboardDelivery["networkId"] }>();
     for (const payment of settled) {
       const key = `${payment.networkId}:${payment.asset.type === "native" ? "native" : payment.asset.contractId}`;
       const total = totals.get(key);
-      totals.set(key, { amount: (total?.amount ?? 0n) + BigInt(payment.amount), asset: payment.asset });
+      totals.set(key, { amount: (total?.amount ?? 0n) + BigInt(payment.amount), asset: payment.asset, networkId: payment.networkId });
     }
     return { settled: settled.length, attention: deliveries.filter(payment => needsAttention(displayState(payment))).length, totals: [...totals.values()] };
   }, [deliveries]);
@@ -80,7 +80,7 @@ export default function PaymentsPage() {
     <header className="flex flex-wrap items-end justify-between gap-4"><div><MonoLabel>Merchant workspace / Ledger</MonoLabel><h1 className="mt-2 text-3xl font-semibold tracking-tight">Your payments, in focus.</h1><p className="mt-2 max-w-xl text-sm leading-6 text-ink/60">Follow every payment from checkout to settlement. The details and receipts are all here.</p></div><button type="button" onClick={() => void refresh()} disabled={loading || refreshing} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-white px-4 text-xs font-medium transition hover:bg-paper disabled:opacity-50"><RefreshCw size={14} className={refreshing ? "animate-spin" : ""}/>{refreshing ? "Refreshing…" : "Refresh"}</button></header>
     {error && <div role="alert" className="flex items-start gap-3 rounded-2xl border border-alert/20 bg-alert/5 p-4 text-xs leading-5 text-alert"><AlertCircle size={16} className="mt-0.5 shrink-0"/>{error}</div>}
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-      <article className="min-w-0 rounded-2xl border border-vault bg-vault p-4 text-white sm:p-5"><div className="flex items-center justify-between gap-2"><span className="text-[11px] text-white/65">Settled volume</span><ArrowDownLeft size={16} className="text-signal"/></div><div className="mt-5 space-y-1">{loading ? <p className="text-2xl">—</p> : summary.totals.length ? summary.totals.map((total, i) => <details key={i} className="group"><summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg py-1 outline-none focus-visible:ring-2 focus-visible:ring-signal/60 [&::-webkit-details-marker]:hidden"><span className="min-w-0 truncate font-mono text-xl font-medium tracking-tight" title={formatAssetAmount(total.amount.toString(), total.asset)}>{formatUnitsDisplay(total.amount, total.asset.decimals)}</span><span className="shrink-0 text-sm font-medium text-white/75">{total.asset.symbol}</span><ChevronDown size={12} className="ml-auto shrink-0 text-white/40 transition-transform group-open:rotate-180"/></summary><p className="mb-2 mt-1 break-all rounded-lg bg-white/5 p-2 font-mono text-[11px] leading-5 text-white/70"><span className="mb-1 block font-sans text-[10px] text-white/45">Exact amount</span>{formatAssetAmount(total.amount.toString(), total.asset)}</p></details>) : <p className="text-2xl">—</p>}</div><p className="mt-3 hidden text-[10px] leading-5 text-white/55 sm:block">Gross totals · tap an amount for full precision</p></article>
+      <SettledVolumeCard totals={summary.totals} tokens={tokens} loading={loading}/>
       {stats.map(({ label, value, detail, icon: Icon, tone }) => <article key={label} className="min-w-0 rounded-2xl border border-line bg-white p-4 sm:p-5"><div className="flex items-center justify-between gap-2"><span className="text-[11px] text-ink/55">{label}</span><span className={`grid size-7 shrink-0 place-items-center rounded-lg ${tone}`}><Icon size={14}/></span></div><p className="mt-4 font-mono text-3xl font-medium tracking-tight">{loading ? "—" : value}</p><p className="mt-3 hidden text-[10px] leading-5 text-ink/45 sm:block">{detail}</p></article>)}
     </div>
     <section className="min-w-0 overflow-hidden rounded-[22px] border border-line bg-white">
