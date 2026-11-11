@@ -25,6 +25,9 @@ pub(crate) const QUOTE_TTL_SECONDS: i64 = 600;
 
 pub(crate) const MOCK_TOKENS_FIXTURE: &str = r#"[
   {"assetId":"nep141:wrap.near","decimals":24,"blockchain":"near","symbol":"wNEAR","contractAddress":"wrap.near"},
+  {"assetId":"nep141:usdc.fakes.testnet","decimals":6,"blockchain":"near","symbol":"USDC","contractAddress":"usdc.fakes.testnet"},
+  {"assetId":"nep141:usdt.fakes.testnet","decimals":6,"blockchain":"near","symbol":"USDT","contractAddress":"usdt.fakes.testnet"},
+  {"assetId":"nep141:dai.fakes.testnet","decimals":6,"blockchain":"near","symbol":"DAI","contractAddress":"dai.fakes.testnet"},
   {"assetId":"nep141:brz-0xe0caa5f511cf2e3500a9d6df8efc384c56567840.omft.near","decimals":6,"blockchain":"near","symbol":"BRZ","contractAddress":null},
   {"assetId":"nep141:eth-0x2170ed0880ac9a755fd29b2688956bd959f933f8.omft.near","decimals":18,"blockchain":"eth","symbol":"ETH","contractAddress":"0x2170ed0880ac9a755fd29b2688956bd959f933f8"},
   {"assetId":"nep141:base-0x0000000000000000000000000000000000000000.omft.near","decimals":18,"blockchain":"base","symbol":"ETH","contractAddress":"0x0000000000000000000000000000000000000000"},
@@ -505,7 +508,8 @@ fn resolve_destination_asset<'a>(
             .iter()
             .find(|token| {
                 token.asset_id.starts_with("nep141:")
-                    && token.contract_address.as_deref() == Some(contract_id.as_str())
+                    && (token.contract_address.as_deref() == Some(contract_id.as_str())
+                        || token.asset_id.strip_prefix("nep141:") == Some(contract_id.as_str()))
             })
             .map(|token| token.asset_id.as_str())
             .ok_or_else(|| ApiError::bad_request(
@@ -1594,9 +1598,18 @@ mod tests {
             resolve_destination_asset(&tokens, &usdc).unwrap(),
             "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near"
         );
-        let unknown = AssetDto::Nep141 {
+        let fakes_usdc = AssetDto::Nep141 {
             contract_id: "usdc.fakes.testnet".to_owned(),
             symbol: "USDC".to_owned(),
+            decimals: 6,
+        };
+        assert_eq!(
+            resolve_destination_asset(&tokens, &fakes_usdc).unwrap(),
+            "nep141:usdc.fakes.testnet"
+        );
+        let unknown = AssetDto::Nep141 {
+            contract_id: "unsupported.fakes.testnet".to_owned(),
+            symbol: "UNSUPPORTED".to_owned(),
             decimals: 6,
         };
         assert!(resolve_destination_asset(&tokens, &unknown).is_err());
