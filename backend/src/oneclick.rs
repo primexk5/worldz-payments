@@ -14,6 +14,7 @@ use worldz_near_protocol::NetworkId;
 use crate::db::sqlx;
 use crate::error::ApiError;
 use crate::models::AssetDto;
+use crate::near_rpc;
 use crate::state::{AppState, CachedOneClickTokens};
 
 const TOKENS_CACHE_TTL_SECONDS: u64 = 600;
@@ -166,7 +167,7 @@ pub(crate) fn build_quote_request(
         ));
     }
     let deadline = chrono::DateTime::from_timestamp(deadline_seconds, 0)
-        .ok_or_else(|| ApiError::internal())?
+        .ok_or_else(ApiError::internal)?
         .to_rfc3339();
     Ok(json!({
         "dry": dry,
@@ -859,7 +860,7 @@ pub async fn create_attempt(
     .bind(&origin.blockchain)
     .bind(&deposit_address)
     .bind(&wet.deposit_memo)
-    .bind(i64::from(deadline_seconds))
+    .bind(deadline_seconds)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -991,6 +992,364 @@ async fn read_attempt_detail(
         row.try_get("tx_hash")?,
         row.try_get("failure_reason")?,
     ))
+}
+
+pub fn spawn_oneclick_worker(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut backoff = crate::workers::Backoff::default();
+        loop {
+            interval.tick().await;
+            match worker_tick(&state).await {
+                Ok(_) => backoff.reset(),
+                Err(error) => {
+                    tracing::warn!(%error, "1Click worker tick failed");
+                    backoff.failed("oneclick").await;
+                }
+            }
+        }
+    });
+}
+
+async fn worker_tick(state: &AppState) -> Result<usize, ApiError> {
+    if !state.config.oneclick_enabled {
+        return Ok(0);
+    }
+    let rows = sqlx::query(
+        "SELECT a.attempt_id, a.network_id, a.contract_id, a.order_id, a.merchant_id, a.destination_asset, a.amount_out, a.deposit_address, a.tx_hash, a.deadline, a.status, a.updated_at \
+         FROM one_click_attempts a \
+         WHERE a.status IN ('AWAITING_DEPOSIT','PENDING_DEPOSIT','PROCESSING','INCOMPLETE_DEPOSIT') \
+         ORDER BY a.created_at LIMIT 25",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let mut processed = 0usize;
+    for row in rows {
+        if let Err(error) = refresh_attempt(state, &row).await {
+            let attempt_id: String = row.try_get("attempt_id")?;
+            tracing::warn!(%attempt_id, %error, "1Click attempt refresh failed");
+        } else {
+            processed += 1;
+        }
+    }
+    Ok(processed)
+}
+
+async fn refresh_attempt(state: &AppState, row: &sqlx::postgres::PgRow) -> Result<(), ApiError> {
+    let attempt_id: String = row.try_get("attempt_id")?;
+    let status: String = row.try_get("status")?;
+    let deadline: chrono::DateTime<Utc> = row.try_get("deadline")?;
+    if deadline <= Utc::now() && status != "AWAITING_DEPOSIT" {
+        return close_attempt(state, &attempt_id, "INCOMPLETE_DEPOSIT").await;
+    }
+    if deadline <= Utc::now() {
+        return close_attempt(state, &attempt_id, "EXPIRED").await;
+    }
+    if status == "AWAITING_DEPOSIT" {
+        return Ok(());
+    }
+    if simulated(state) {
+        return mock_refresh(state, row).await;
+    }
+    let deposit_address: String = row.try_get("deposit_address")?;
+    let response = live_status(state, &deposit_address).await?;
+    match response.status {
+        SwapStatus::Success => settle_success(state, row, &response.swap_outcome).await,
+        SwapStatus::KnownDepositTx | SwapStatus::PendingDeposit => {
+            set_attempt_status(state, &attempt_id, "PENDING_DEPOSIT").await
+        }
+        SwapStatus::Processing => set_attempt_status(state, &attempt_id, "PROCESSING").await,
+        SwapStatus::IncompleteDeposit => {
+            set_attempt_status(state, &attempt_id, "INCOMPLETE_DEPOSIT").await
+        }
+        SwapStatus::Refunded => close_attempt(state, &attempt_id, "REFUNDED").await,
+        SwapStatus::Failed => close_attempt(state, &attempt_id, "FAILED").await,
+    }
+}
+
+fn mock_outcome(state: &AppState) -> SwapStatus {
+    match state.config.oneclick_mock_outcome.as_deref() {
+        Some("refunded") => SwapStatus::Refunded,
+        Some("failed") => SwapStatus::Failed,
+        Some("incomplete_deposit") => SwapStatus::IncompleteDeposit,
+        _ => SwapStatus::Success,
+    }
+}
+
+fn synthetic_near_hash(seed: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(seed.as_bytes());
+    bs58::encode(digest).into_string()
+}
+
+async fn mock_refresh(state: &AppState, row: &sqlx::postgres::PgRow) -> Result<(), ApiError> {
+    let attempt_id: String = row.try_get("attempt_id")?;
+    let updated_at: chrono::DateTime<Utc> = row.try_get("updated_at")?;
+    let elapsed = (Utc::now() - updated_at).num_seconds();
+    if elapsed < MOCK_SETTLE_DELAY_SECONDS {
+        return set_attempt_status(state, &attempt_id, "PROCESSING").await;
+    }
+    match mock_outcome(state) {
+        SwapStatus::Success => {
+            let outcome = SwapOutcome {
+                near_tx_hashes: vec![synthetic_near_hash(&attempt_id)],
+                destination_tx_hashes: vec![],
+                amount_out: Some(row.try_get::<String, _>("amount_out").unwrap_or_default()),
+            };
+            settle_success(state, row, &outcome).await
+        }
+        SwapStatus::Refunded => close_attempt(state, &attempt_id, "REFUNDED").await,
+        SwapStatus::Failed => close_attempt(state, &attempt_id, "FAILED").await,
+        SwapStatus::IncompleteDeposit => {
+            set_attempt_status(state, &attempt_id, "INCOMPLETE_DEPOSIT").await
+        }
+        _ => set_attempt_status(state, &attempt_id, "PROCESSING").await,
+    }
+}
+
+async fn set_attempt_status(
+    state: &AppState,
+    attempt_id: &str,
+    status: &str,
+) -> Result<(), ApiError> {
+    sqlx::query("UPDATE one_click_attempts SET status=?, updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=? AND status IN ('AWAITING_DEPOSIT','PENDING_DEPOSIT','PROCESSING','INCOMPLETE_DEPOSIT')")
+        .bind(status)
+        .bind(attempt_id)
+        .execute(&state.pool)
+        .await?;
+    Ok(())
+}
+
+async fn close_attempt(state: &AppState, attempt_id: &str, status: &str) -> Result<(), ApiError> {
+    sqlx::query("UPDATE one_click_attempts SET status=?, updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=? AND status IN ('AWAITING_DEPOSIT','PENDING_DEPOSIT','PROCESSING','INCOMPLETE_DEPOSIT')")
+        .bind(status)
+        .bind(attempt_id)
+        .execute(&state.pool)
+        .await?;
+    Ok(())
+}
+
+fn receipt_succeeded(outcome: &Value) -> bool {
+    matches!(
+        outcome.get("status").and_then(Value::as_str),
+        Some("SuccessValue") | Some("SuccessReceiptId")
+    )
+}
+
+pub(crate) fn find_verified_transfer(
+    receipts: &Value,
+    token_contract: &str,
+    payout_account: &str,
+    expected_amount: &str,
+) -> Option<(String, usize)> {
+    let expected: u128 = if expected_amount.is_empty()
+        || !expected_amount.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    } else {
+        expected_amount.parse().ok()?
+    };
+    for receipt in receipts
+        .get("receipts_outcome")
+        .and_then(Value::as_array)
+        .unwrap_or(&Vec::new())
+    {
+        let outcome = receipt.get("outcome").unwrap_or(&Value::Null);
+        if outcome.get("executor_id").and_then(Value::as_str) != Some(token_contract)
+            || !receipt_succeeded(outcome)
+        {
+            continue;
+        }
+        let receipt_id = receipt
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        for (log_index, log) in outcome
+            .get("logs")
+            .and_then(Value::as_array)
+            .unwrap_or(&Vec::new())
+            .iter()
+            .enumerate()
+        {
+            let Some(event) = log
+                .as_str()
+                .and_then(|line| line.strip_prefix("EVENT_JSON:"))
+                .and_then(|line| serde_json::from_str::<Value>(line).ok())
+            else {
+                continue;
+            };
+            if event.get("standard").and_then(Value::as_str) != Some("nep141")
+                || event.get("event").and_then(Value::as_str) != Some("ft_transfer")
+            {
+                continue;
+            }
+            let Some(data) = event
+                .get("data")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+            else {
+                continue;
+            };
+            let transferred = data.get("amount").and_then(Value::as_str).unwrap_or("");
+            if data.get("new_owner_id").and_then(Value::as_str) != Some(payout_account)
+                || transferred.is_empty()
+                || !transferred.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                continue;
+            }
+            let transferred: u128 = transferred.parse().unwrap_or(0);
+            if transferred >= expected {
+                return Some((receipt_id.to_owned(), log_index));
+            }
+        }
+    }
+    None
+}
+
+async fn settle_success(
+    state: &AppState,
+    row: &sqlx::postgres::PgRow,
+    outcome: &SwapOutcome,
+) -> Result<(), ApiError> {
+    let attempt_id: String = row.try_get("attempt_id")?;
+    let claimed = sqlx::query("UPDATE one_click_attempts SET status='PROCESSING', updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=? AND status IN ('PENDING_DEPOSIT','PROCESSING','INCOMPLETE_DEPOSIT')")
+        .bind(&attempt_id)
+        .execute(&state.pool)
+        .await?;
+    if claimed.rows_affected() == 0 {
+        return Ok(());
+    }
+    let network_raw: String = row.try_get("network_id")?;
+    let network_id = match network_raw.as_str() {
+        "testnet" => NetworkId::Testnet,
+        "mainnet" => NetworkId::Mainnet,
+        _ => return Err(ApiError::internal()),
+    };
+    let contract_id: String = row.try_get("contract_id")?;
+    let order_id: String = row.try_get("order_id")?;
+    let merchant_id: String = row.try_get("merchant_id")?;
+    let amount_out: String = row.try_get("amount_out")?;
+    let expected: u128 = amount_out.parse().unwrap_or(0);
+    if let Some(reported) = outcome
+        .amount_out
+        .as_deref()
+        .and_then(|value| value.parse::<u128>().ok())
+    {
+        if reported < expected {
+            tracing::warn!(
+                %attempt_id,
+                reported,
+                expected,
+                "1Click reported less than the quoted amount out; refusing to settle"
+            );
+            return Ok(());
+        }
+    }
+    let destination_asset: String = row.try_get("destination_asset")?;
+    let token_contract = destination_asset
+        .strip_prefix("nep141:")
+        .unwrap_or(&destination_asset)
+        .to_owned();
+    let payout_account: String =
+        sqlx::query("SELECT payout_account_id FROM merchants WHERE merchant_id=?")
+            .bind(&merchant_id)
+            .fetch_one(&state.pool)
+            .await?
+            .try_get("payout_account_id")?;
+    let verified = if simulated(state) {
+        let receipt = synthetic_near_hash(&format!("{attempt_id}:receipt"));
+        let hash = synthetic_near_hash(&attempt_id);
+        Some((receipt, 0usize, hash))
+    } else {
+        let mut verified = None;
+        let mut hashes = outcome.near_tx_hashes.clone();
+        hashes.extend(outcome.destination_tx_hashes.clone());
+        for hash in &hashes {
+            let Ok(status) =
+                near_rpc::transaction_status(state, network_id, hash, &token_contract).await
+            else {
+                continue;
+            };
+            if let Some(found) =
+                find_verified_transfer(&status, &token_contract, &payout_account, &amount_out)
+            {
+                verified = Some((found.0, found.1, hash.clone()));
+                break;
+            }
+        }
+        verified
+    };
+    let Some((receipt_id, log_index, near_tx_hash)) = verified else {
+        tracing::warn!(
+            %attempt_id,
+            "1Click reports SUCCESS but no verified NEAR transfer to the merchant was found; will retry"
+        );
+        return Ok(());
+    };
+    let order_row =
+        sqlx::query("SELECT * FROM orders WHERE network_id=? AND contract_id=? AND order_id=?")
+            .bind(network_id.as_str())
+            .bind(&contract_id)
+            .bind(&order_id)
+            .fetch_one(&state.pool)
+            .await?;
+    let payer: String = order_row.try_get("payer_account_id")?;
+    let receipt = crate::orders::SettlementReceipt {
+        transaction_hash: &near_tx_hash,
+        receipt_id: &receipt_id,
+        log_index,
+        payout_account_id: &payout_account,
+    };
+    crate::orders::finalize_settlement(
+        state,
+        &order_row,
+        network_id,
+        &contract_id,
+        &order_id,
+        &merchant_id,
+        &payer,
+        receipt,
+    )
+    .await?;
+    let order_state: String =
+        sqlx::query("SELECT state FROM orders WHERE network_id=? AND contract_id=? AND order_id=?")
+            .bind(network_id.as_str())
+            .bind(&contract_id)
+            .bind(&order_id)
+            .fetch_one(&state.pool)
+            .await?
+            .try_get("state")?;
+    let attempt_status = if order_state == "SETTLED" {
+        "SETTLED"
+    } else {
+        "RECONCILIATION_REQUIRED"
+    };
+    sqlx::query(
+        "UPDATE one_click_attempts SET status=?, updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=?",
+    )
+    .bind(attempt_status)
+    .bind(&attempt_id)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) mod test_hooks {
+    use super::*;
+
+    pub(crate) async fn settle_success_for_test(
+        state: &AppState,
+        row: &sqlx::postgres::PgRow,
+        outcome: &SwapOutcome,
+    ) -> Result<(), ApiError> {
+        settle_success(state, row, outcome).await
+    }
+
+    pub(crate) async fn worker_tick_for_test(state: &AppState) -> Result<usize, ApiError> {
+        worker_tick(state).await
+    }
 }
 
 #[cfg(test)]
