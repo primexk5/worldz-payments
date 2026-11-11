@@ -203,7 +203,7 @@ Eligible payment links can offer a separate Pay with another chain option. The c
 
 A testnet preview of airtime, data, electricity and TV package purchases.
 
-Dashboard → Subscriptions provides one-time Nigeria service purchases through the VTpass sandbox. Customers can choose airtime, a data bundle, an electricity provider and meter type, or a TV package, verify eligible meter or smartcard details, request a quote and approve payment from a NEAR testnet wallet.
+Dashboard → Subscriptions provides personal-use, one-time Nigeria service purchases through the VTpass sandbox. Customers enter the relevant service details, request a quote and approve payment from a NEAR testnet wallet. After the quote, the app creates a single-use checkout link tied to that service order. This link is generated for the service purchase; it is not a configurable link for requesting a separate payment. Use the separate Payment links feature for standalone payment requests; those links do not purchase or renew a VTpass service.
 
 1. **Choose and verify the service.** Select the provider and package. Electricity and TV purchases require customer-number verification before quoting.
 2. **Review the quote.** The quote converts the NGN amount to USD and the selected enabled testnet NEAR asset. It expires after ten minutes. Stable test tokens use a 1:1 USD price assumption; no crypto-to-fiat swap occurs.

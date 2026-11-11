@@ -5,6 +5,13 @@ electricity and one-time TV package purchases. The provider is pinned to the
 VTpass sandbox and payments require NEAR testnet. No real service is delivered
 and there are no automatic recurring charges.
 
+This is a personal-use, one-time purchase flow. The customer enters the
+relevant service details, requests a quote, and the app creates a single-use
+payment link for that specific order. This checkout link is generated for the
+service purchase; it is not a configurable link for requesting a separate
+payment. Use the separate Payment links feature for standalone payment
+requests; those links do not trigger a VTpass purchase or renewal.
+
 ## Purchase flow
 
 1. Load the provider catalog and package prices. Verify the meter or TV smartcard.
