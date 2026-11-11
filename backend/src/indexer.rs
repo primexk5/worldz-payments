@@ -8,6 +8,7 @@ use worldz_near_protocol::NetworkId;
 use crate::{db::sqlx, near_rpc, orders, state::AppState};
 
 const MAX_BLOCKS_PER_TICK: u64 = 4;
+const MAX_CURSOR_LAG_BLOCKS: u64 = 5_000;
 
 pub fn spawn_indexer_worker(state: AppState) {
     tokio::spawn(async move {
@@ -79,7 +80,24 @@ async fn index_network(
     .fetch_optional(&state.pool)
     .await?;
     let mut height = if let Some(row) = cursor {
-        row.get::<i64, _>("block_height") as u64 + 1
+        let stored = row.get::<i64, _>("block_height") as u64 + 1;
+        if network.indexer_start_height > stored {
+            network.indexer_start_height
+        } else if network.indexer_start_height == 0
+            && stored.saturating_add(MAX_CURSOR_LAG_BLOCKS) < tip
+        {
+            let catchup = tip.saturating_sub(100);
+            tracing::info!(
+                network = network_id.as_str(),
+                stored,
+                tip,
+                skipped = tip.saturating_sub(stored),
+                "NEAR indexer cursor was too far behind tip; fast-forwarding to recent blocks"
+            );
+            catchup
+        } else {
+            stored
+        }
     } else {
         let start = network.indexer_start_height;
         let initial = if start > 0 {

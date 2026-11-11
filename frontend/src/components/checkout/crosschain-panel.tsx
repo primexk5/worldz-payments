@@ -220,7 +220,7 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
                   disabled={busy}
                   className="flex-1"
                 />
-                <button onClick={() => void getQuote()} disabled={busy || !selected} className="flex h-11 items-center gap-2 rounded-full bg-ink px-4 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCcw size={14} />}Get quote</button>
+                <button onClick={() => void getQuote()} disabled={busy || !selected} className="flex h-11 items-center gap-2 rounded-xl bg-ink px-4 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCcw size={14} />}Get quote</button>
               </div>
             </div>
           )}
