@@ -78,7 +78,7 @@ export function PaymentLinksPromotion() {
             <div className="rounded-2xl bg-[#fffefa] p-6 shadow-xl sm:p-7">
               <div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl border border-line bg-paper"><ShoppingBag size={18}/></span><div><p className="text-sm font-semibold">Studio North</p><p className="mt-1 text-[11px] text-ink/50">Design deposit</p></div></div>
               <p className="mt-8 text-xs text-ink/55">Amount to pay</p><p className="mt-2 font-mono text-4xl tracking-[-.06em]">25.00 <span className="text-base tracking-normal text-ink/50">NEAR</span></p>
-              <div className="my-6 border-t border-dashed border-line"/>
+              <div className="my-6 h-px bg-ink/10"/>
               <div className="flex items-center justify-between gap-3 text-xs"><span className="text-ink/55">Payment method</span><span className="flex items-center gap-2"><NearLogo className="size-3"/>NEAR wallet</span></div>
               <div className="mt-5 flex h-11 items-center justify-center gap-2 rounded-lg bg-ink text-xs font-medium text-white"><Wallet size={14}/>Connect wallet to pay</div>
               <p className="mt-3 text-center text-[10px] text-ink/50">Review the amount and fees before signing.</p>
