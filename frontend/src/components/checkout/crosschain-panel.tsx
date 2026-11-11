@@ -18,8 +18,6 @@ interface EvmOption {
   connect(): Promise<CrossChainWallet>;
 }
 
-const BLOCKCHAIN_LABELS: Record<string, string> = { eth: "Ethereum", base: "Base", arb: "Arbitrum", sol: "Solana" };
-
 function originAssetOf(token: OneClickToken): NearAssetLike {
   return { type: "nep141", contractId: token.contractAddress, symbol: token.symbol, decimals: token.decimals };
 }
@@ -30,7 +28,7 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
   const [open, setOpen] = useState(false);
   const [tokens, setTokens] = useState<OneClickToken[]>([]);
   const [mode, setMode] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string>("");
+  const [selectedAsset, setSelected] = useState<string>("");
   const [wallet, setWallet] = useState<CrossChainWallet | null>(null);
   const [evmOptions, setEvmOptions] = useState<EvmOption[]>([]);
   const [quote, setQuote] = useState<OneClickQuote | null>(null);
@@ -121,8 +119,6 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
     setState("depositing");
   });
 
-  const origin = tokens.find((token) => token.assetId === selected) ?? null;
-
   const originTokens = useMemo(() => {
     return tokens.filter((token) => {
       // Exclude tokens on NEAR, as this panel is for paying from external chains into NEAR
@@ -140,16 +136,10 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
     });
   }, [tokens, wallet]);
 
-  useEffect(() => {
-    if (originTokens.length === 0) {
-      if (selected) setSelected("");
-      return;
-    }
-    const isValid = originTokens.some((t) => t.assetId === selected);
-    if (!isValid) {
-      setSelected(originTokens[0].assetId);
-    }
-  }, [originTokens, selected]);
+  const selected = originTokens.some((token) => token.assetId === selectedAsset)
+    ? selectedAsset
+    : originTokens[0]?.assetId ?? "";
+  const origin = originTokens.find((token) => token.assetId === selected) ?? null;
 
   const sendDeposit = () => run(async () => {
     if (!wallet || !attempt || !origin) return;
@@ -172,8 +162,8 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
   }
 
   return (
-    <section className="mt-3 rounded-xl border border-line bg-white p-4">
-      <div className="flex items-center justify-between gap-2">
+    <section className="mt-5 min-w-0 rounded-2xl border border-line bg-paper/30 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Coins size={14} className="text-green-deep" />
           <MonoLabel>Pay with another chain</MonoLabel>
@@ -207,20 +197,20 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
               </div>
             </>
           ) : (
-            <div className="mt-4 rounded-xl bg-paper p-3">
-              <div className="flex items-center justify-between gap-3 text-xs">
+            <div className="mt-4 min-w-0 space-y-4">
+              <div className="flex min-w-0 flex-col gap-1 rounded-xl border border-line bg-white p-3 text-xs">
                 <span className="text-mist">{wallet.name} · {wallet.kind === "evm" ? "EVM" : "Solana"}</span>
                 <span className="break-all font-mono text-[11px]">{wallet.address}</span>
               </div>
-              <div className="mt-3 flex items-center gap-2">
+              <div className="grid min-w-0 gap-3">
                 <OriginTokenSelect
                   tokens={originTokens}
                   value={selected}
                   onChange={setSelected}
                   disabled={busy}
-                  className="flex-1"
+                  className="min-w-0"
                 />
-                <button onClick={() => void getQuote()} disabled={busy || !selected} className="flex h-11 items-center gap-2 rounded-full bg-ink px-4 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCcw size={14} />}Get quote</button>
+                <button onClick={() => void getQuote()} disabled={busy || !selected} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-ink px-4 text-sm font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCcw size={14} />}Get quote</button>
               </div>
             </div>
           )}

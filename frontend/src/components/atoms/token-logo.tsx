@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Coins } from "lucide-react";
+import { TokenSvg } from "@/components/atoms/crypto-icon";
 import { NearLogo } from "@/components/atoms/near-logo";
 
 /** Uses the icon supplied by verified NEP-141 metadata, including SVG data URIs. */
@@ -14,6 +14,6 @@ export function TokenLogo({ symbol, icon, className = "size-9" }: { symbol: stri
       // Metadata icons may be remote URLs or data URIs; serve them without an image proxy.
       // eslint-disable-next-line @next/next/no-img-element
       <img src={image} alt="" width={36} height={36} className="h-full w-full object-contain" referrerPolicy="no-referrer" onError={() => setFailedIcon(source ?? null)}/>
-    ) : <Coins className="h-1/2 w-1/2"/>}
+    ) : <TokenSvg symbol={symbol} className="h-full w-full text-[10px]"/>}
   </span>;
 }

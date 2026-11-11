@@ -1,7 +1,9 @@
 "use client";
 
-import { Check, ChevronDown, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, Search, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Combobox } from "@base-ui/react/combobox";
+import { CryptoTokenIcon } from "@/components/atoms/crypto-icon";
 import type { OneClickToken } from "@/lib/crosschain/types";
 
 const CHAIN_LABELS: Record<string, string> = {
@@ -13,13 +15,18 @@ const CHAIN_LABELS: Record<string, string> = {
   near: "NEAR",
 };
 
-const CHAIN_BADGE_STYLES: Record<string, string> = {
-  eth: "bg-slate-100 text-slate-800 border-slate-200",
-  base: "bg-blue-50 text-blue-700 border-blue-200/70",
-  arb: "bg-sky-50 text-sky-700 border-sky-200/70",
-  sol: "bg-purple-50 text-purple-700 border-purple-200/70",
-  btc: "bg-amber-50 text-amber-800 border-amber-200/70",
-  near: "bg-emerald-50 text-emerald-800 border-emerald-200/70",
+const TOKEN_NAMES: Record<string, string> = {
+  ETH: "Ether",
+  WETH: "Wrapped Ether",
+  USDC: "USD Coin",
+  USDT: "Tether USD",
+  SOL: "Solana",
+  BTC: "Bitcoin",
+  WBTC: "Wrapped Bitcoin",
+  DAI: "Dai Stablecoin",
+  NEAR: "NEAR",
+  WNEAR: "Wrapped NEAR",
+  BRZ: "Brazilian Digital Token",
 };
 
 interface OriginTokenSelectProps {
@@ -37,41 +44,10 @@ export function OriginTokenSelect({
   onChange,
   disabled = false,
   className = "",
-  placeholder = "Choose a token",
+  placeholder = "Choose origin token",
 }: OriginTokenSelectProps) {
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const container = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (event: MouseEvent) => {
-      if (container.current && !container.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointer);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onPointer);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (open) {
-      // Focus search input on open
-      setTimeout(() => searchInputRef.current?.focus(), 50);
-    } else {
-      setQuery("");
-    }
-  }, [open]);
 
   const selected = useMemo(
     () => tokens.find((token) => token.assetId === value) ?? null,
@@ -85,115 +61,122 @@ export function OriginTokenSelect({
       const symbolMatch = token.symbol.toLowerCase().includes(needle);
       const chainName = CHAIN_LABELS[token.blockchain] ?? token.blockchain;
       const chainMatch = chainName.toLowerCase().includes(needle);
-      return symbolMatch || chainMatch;
+      const nameMatch = (TOKEN_NAMES[token.symbol] ?? "").toLowerCase().includes(needle);
+      return symbolMatch || chainMatch || nameMatch;
     });
   }, [tokens, query]);
 
-  const toggle = () => {
-    if (disabled || tokens.length === 0) return;
-    setOpen((prev) => !prev);
-  };
-
   return (
-    <div ref={container} className={`relative ${className}`}>
-      <button
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label="Select origin token"
-        disabled={disabled || tokens.length === 0}
-        onClick={toggle}
-        className={`flex h-11 w-full items-center justify-between gap-2.5 rounded-xl border bg-white px-3.5 text-sm transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-          open
-            ? "border-ink ring-1 ring-ink/20 shadow-sm"
-            : "border-line hover:border-ink/30"
-        }`}
-      >
+    <div className={`min-w-0 ${className}`}>
+      <Combobox.Root items={tokens} filteredItems={filtered} value={selected} onValueChange={(token) => { if (token) onChange(token.assetId); }} onInputValueChange={setQuery} onOpenChange={(open) => { if (!open) setQuery(""); }} itemToStringLabel={(token) => token.symbol} isItemEqualToValue={(a, b) => a.assetId === b.assetId} disabled={disabled || tokens.length === 0} autoHighlight>
+      {/* Trigger Button */}
+      <Combobox.Trigger aria-label="Select origin token and network" className="group flex min-h-16 w-full items-center justify-between gap-3 rounded-xl border border-line bg-white px-4 py-3 text-sm transition hover:border-ink/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-deep disabled:opacity-50 data-[popup-open]:border-green-deep">
         {selected ? (
-          <span className="flex min-w-0 items-center gap-2">
-            <span
-              className={`rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ${
-                CHAIN_BADGE_STYLES[selected.blockchain] ??
-                "bg-paper text-ink/70 border-line"
-              }`}
-            >
-              {CHAIN_LABELS[selected.blockchain] ?? selected.blockchain}
-            </span>
-            <span className="font-semibold text-ink">{selected.symbol}</span>
-          </span>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <CryptoTokenIcon
+              symbol={selected.symbol}
+              blockchain={selected.blockchain}
+              size={34}
+            />
+            <div className="flex min-w-0 flex-col gap-0.5 text-left">
+              <span className="font-semibold text-ink text-sm tracking-tight">
+                {selected.symbol}
+              </span>
+
+              <span className="text-xs font-medium text-ink/70 truncate">
+                {CHAIN_LABELS[selected.blockchain] ?? selected.blockchain}
+              </span>
+            </div>
+          </div>
         ) : (
-          <span className="text-mist">
+          <span className="text-mist text-xs font-medium">
             {tokens.length === 0 ? "Loading tokens…" : placeholder}
           </span>
         )}
-        <ChevronDown
-          size={15}
-          className={`shrink-0 text-mist transition-transform duration-200 ${
-            open ? "rotate-180 text-ink" : ""
-          }`}
-        />
-      </button>
-
-      {open && (
-        <div className="absolute left-0 right-0 z-30 mt-1.5 min-w-[240px] overflow-hidden rounded-xl border border-line bg-white shadow-[0_12px_40px_rgba(11,15,14,.12)] animate-in fade-in-50 zoom-in-95 duration-150">
-          <div className="flex items-center gap-2 border-b border-line bg-paper/60 px-3 py-2">
-            <Search size={13} className="shrink-0 text-mist" />
-            <input
-              ref={searchInputRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search token or chain…"
-              className="h-6 w-full bg-transparent text-xs text-ink outline-none placeholder:text-mist"
-            />
+        <div className="flex items-center gap-1 text-mist shrink-0">
+          <ChevronDown size={16} className="transition-transform group-data-[popup-open]:rotate-180"/>
+        </div>
+      </Combobox.Trigger>
+      <Combobox.Portal>
+        <Combobox.Positioner sideOffset={8} align="start" collisionPadding={12} className="z-[110] outline-none">
+        <Combobox.Popup initialFocus={searchInputRef} className="flex max-h-[min(420px,var(--available-height))] w-[min(360px,calc(100vw-24px))] min-w-[min(var(--anchor-width),calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border border-line bg-white text-ink shadow-[0_16px_48px_rgba(11,15,14,.16)] outline-none">
+          {/* Search Header */}
+          <div className="shrink-0 border-b border-line/60 bg-paper/50 p-2">
+            <div className="flex items-center gap-2 rounded-xl border border-line bg-white px-2.5 py-1.5 transition-all focus-within:border-ink/50 focus-within:ring-2 focus-within:ring-ink/5">
+              <Search size={13} className="shrink-0 text-mist" />
+              <Combobox.Input
+                ref={searchInputRef}
+                aria-label="Search tokens or networks"
+                placeholder="Search token or chain…"
+                className="h-10 w-full min-w-0 bg-transparent text-base sm:text-sm text-ink outline-none placeholder:text-mist"
+              />
+              {query && (
+                <Combobox.Clear
+                  className="shrink-0 text-mist hover:text-ink"
+                  aria-label="Clear search"
+                >
+                  <X size={13} />
+                </Combobox.Clear>
+              )}
+            </div>
           </div>
 
-          <ul role="listbox" className="max-h-60 overflow-y-auto py-1.5">
+          <p className="shrink-0 px-4 pt-3 pb-2 text-[10px] font-medium uppercase tracking-widest text-ink/50">Available tokens</p>
+          <Combobox.List className="min-h-0 overflow-y-auto overscroll-contain p-1.5 space-y-0.5">
             {filtered.length === 0 ? (
-              <li className="px-3 py-4 text-center text-xs text-mist">
-                No matching tokens found
-              </li>
+              <Combobox.Empty className="px-3 py-6 text-center text-xs text-mist">
+                No matching tokens or networks
+              </Combobox.Empty>
             ) : (
               filtered.map((token) => {
                 const isSelected = token.assetId === value;
-                const badgeStyle =
-                  CHAIN_BADGE_STYLES[token.blockchain] ??
-                  "bg-paper text-ink/70 border-line";
-                const chainLabel =
-                  CHAIN_LABELS[token.blockchain] ?? token.blockchain;
+                const chainName = CHAIN_LABELS[token.blockchain] ?? token.blockchain;
+                const tokenFullName = TOKEN_NAMES[token.symbol] ?? token.symbol;
 
                 return (
-                  <li key={token.assetId}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      onClick={() => {
-                        onChange(token.assetId);
-                        setOpen(false);
-                      }}
-                      className={`flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-xs transition hover:bg-paper ${
-                        isSelected ? "bg-paper/80 font-medium" : ""
+                  <Combobox.Item key={token.assetId} value={token}
+                      className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left outline-none data-[highlighted]:bg-paper transition-all ${
+                        isSelected
+                          ? "bg-paper font-medium border border-line/60"
+                          : "hover:bg-paper/80 border border-transparent"
                       }`}
                     >
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <span
-                          className={`w-20 shrink-0 rounded-md border px-1.5 py-0.5 text-center font-mono text-[10px] font-semibold uppercase tracking-wider ${badgeStyle}`}
-                        >
-                          {chainLabel}
+                      <div className="flex min-w-0 items-center gap-3">
+                        <CryptoTokenIcon
+                          symbol={token.symbol}
+                          blockchain={token.blockchain}
+                          size={32}
+                        />
+                        <div className="flex flex-col min-w-0 text-left">
+                          <span className="font-semibold text-sm text-ink leading-tight">
+                            {token.symbol}
+                          </span>
+                          <span className="text-[11px] text-mist truncate leading-tight mt-0.5">
+                            {tokenFullName} on {chainName}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="rounded-md bg-paper border border-line/60 px-1.5 py-0.5 font-mono text-[9px] uppercase font-semibold text-ink/70">
+                          {chainName}
                         </span>
-                        <span className="font-medium text-ink">{token.symbol}</span>
-                      </span>
-                      {isSelected && (
-                        <Check size={14} className="shrink-0 text-green-deep" />
-                      )}
-                    </button>
-                  </li>
+                        {isSelected && (
+                          <Check
+                            size={16}
+                            className="text-green-deep stroke-[2.5] shrink-0"
+                          />
+                        )}
+                      </div>
+                  </Combobox.Item>
                 );
               })
             )}
-          </ul>
-        </div>
-      )}
+          </Combobox.List>
+        </Combobox.Popup>
+        </Combobox.Positioner>
+      </Combobox.Portal>
+      </Combobox.Root>
     </div>
   );
 }

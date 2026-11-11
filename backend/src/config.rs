@@ -435,7 +435,7 @@ fn network_config(
 fn default_fallbacks(network_id: NetworkId) -> &'static str {
     match network_id {
         NetworkId::Testnet => {
-            "https://near-testnet.drpc.org,https://testnet-rpc.intea.rs,https://test.rpc.fastnear.com,https://rpc.testnet.near.org"
+            "https://archival-rpc.testnet.near.org,https://near-testnet.drpc.org,https://testnet-rpc.intea.rs,https://test.rpc.fastnear.com,https://rpc.testnet.near.org"
         }
         NetworkId::Mainnet => {
             "https://rpc.intea.rs,https://free.rpc.fastnear.com,https://archival-rpc.mainnet.near.org"
