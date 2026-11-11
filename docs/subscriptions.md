@@ -45,5 +45,6 @@ transaction or verify delivery by the external VTpass sandbox. Those require a
 configured sandbox account and a testnet wallet. Do not treat fixture success as
 live service delivery verification.
 
-Cross-chain homepage promotion describes enabled mainnet checkout routes; it
-does not enable cross-chain payments for bills and subscriptions.
+Cross-chain checkout is a separate feature for eligible payment links. Its
+enabled mainnet routes do not make cross-chain payments available for bills and
+subscriptions.

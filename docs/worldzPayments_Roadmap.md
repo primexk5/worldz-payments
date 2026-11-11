@@ -1,6 +1,6 @@
 # worldzPayments product roadmap
 
-Updated: 6 November 2026
+Updated: 11 November 2026
 
 ## Core product priorities
 
@@ -35,6 +35,8 @@ All roadmap additions are planned. Current hosted checkout requires a NEAR walle
 
 These are planning estimates rather than committed delivery dates. External approval time is additional to engineering time. Walletless checkout scope and timing depend on provider selection and the agreed custody, settlement and approval requirements.
 
-## Planned bills and subscriptions expansion
+## Bills and subscriptions
 
-The current Nigeria VTpass integration is a sandbox preview for airtime, data, electricity and one-time TV package purchases. Planned expansion includes more countries and regional service providers, subject to provider availability, pricing and live fulfillment validation. Automatic recurring billing is not currently supported.
+**Available preview:** Nigeria VTpass sandbox airtime, data, electricity and one-time TV package purchases on NEAR testnet. No real service is delivered, and automatic recurring billing is not supported.
+
+**Planned:** Add more countries and local service providers, subject to provider access, regional pricing and live fulfillment validation. This is a direction for future work, not a delivery date.

@@ -12,6 +12,8 @@ Code examples use testnet. Relative API paths refer to the frontend origin.
 - [Create & share payment links](#payment-links)
 - [Shopify product checkout](#shopify)
 - [The customer checkout](#customer-checkout)
+- [Pay from another chain](#cross-chain)
+- [Nigeria bills & subscriptions](#bills-and-subscriptions)
 - [Receipts & payer details](#receipts)
 - [Invoice-style payment requests](#invoice-requests)
 - [Settlement & payment states](#settlement)
@@ -75,6 +77,8 @@ Use the wallet that owns your existing merchant account when you return. If your
 Choose the correct network and preserve token precision.
 
 Native NEAR uses 24 decimal places. NEP-141 tokens use the decimals reported by their token contract. Only tokens enabled for the configured network are offered in checkout. Supporting a token on testnet does not imply it is enabled on mainnet.
+
+Token and network support depend on the checkout. The Nigeria VTpass preview accepts testnet NEAR and enabled testnet USD stable tokens, including bridged USDC.e and USDT.e and DAI where configured. Stable-token quote pricing assumes 1 USD per token; it is not a swap or a fiat conversion. Read the enabled-asset endpoint and the payment link to confirm the exact token.
 
 | Example | Display amount | Base-unit amount |
 | --- | --- | --- |
@@ -177,6 +181,50 @@ A hosted payment-link checkout uses /pay/{slug}. A direct checkout uses /checkou
 
 - [Preview checkout without sending a transaction](https://YOUR_PLATFORM_ORIGIN/checkout/demo)
 - [Understand payment states](#settlement)
+
+<a id="cross-chain"></a>
+
+## Pay from another chain
+
+How eligible payment links accept supported wallets from other networks.
+
+Eligible payment links can offer a separate Pay with another chain option. The customer selects a supported token on Ethereum, Base, Arbitrum or Solana, reviews a quote, and approves the transfer in the connected source-chain wallet. NEAR Intents converts the payment into the NEP-141 asset configured on the link and routes it to the merchant on NEAR.
+
+1. **Check route availability.** Cross-chain payment is available only when enabled for the deployment, link, destination token and source asset. Live swaps run on mainnet.
+2. **Review and approve.** The wallet shows the source asset and amount before signing. The checkout submits the transfer to a single-use deposit address; customers do not need to copy or paste a deposit address.
+3. **Wait for settlement.** The backend checks the swap and verifies the merchant payout on NEAR. A submitted source-chain transfer is still processing until that payout is confirmed.
+
+> **Testnet uses simulated payments**
+> Testnet cross-chain checkout is for trying the flow. It uses simulated deposits, sends no real funds and does not perform a live swap. Live cross-chain availability depends on mainnet configuration and route support.
+
+<a id="bills-and-subscriptions"></a>
+
+## Nigeria bills & subscriptions
+
+A testnet preview of airtime, data, electricity and TV package purchases.
+
+Dashboard → Subscriptions provides one-time Nigeria service purchases through the VTpass sandbox. Customers can choose airtime, a data bundle, an electricity provider and meter type, or a TV package, verify eligible meter or smartcard details, request a quote and approve payment from a NEAR testnet wallet.
+
+1. **Choose and verify the service.** Select the provider and package. Electricity and TV purchases require customer-number verification before quoting.
+2. **Review the quote.** The quote converts the NGN amount to USD and the selected enabled testnet NEAR asset. It expires after ten minutes. Stable test tokens use a 1:1 USD price assumption; no crypto-to-fiat swap occurs.
+3. **Approve once and follow settlement.** Connect a NEAR testnet wallet, check the amount and sign. VTpass fulfillment starts only after verified NEAR payout settlement. Pending or uncertain provider results are reconciled using the same provider request ID.
+4. **Keep the receipt.** The checkout preserves purchase progress across a refresh and shows the provider result when available. A testnet receipt does not represent real-world service delivery.
+
+> **Sandbox preview only**
+> The provider is pinned to VTpass sandbox and the checkout is restricted to NEAR testnet. No real airtime, data, electricity or television package is delivered. Each purchase is a separate customer-approved payment; automatic renewals are not supported.
+
+The selected DStv or GOtv catalog package uses a package-change purchase for one viewing month. Renewing a customer's existing bouquet at its account-specific renewal price is a separate VTpass flow and is not currently offered. Nigeria is the current preview; more countries and service providers are planned, subject to availability and live validation.
+
+| Endpoint | Use |
+| --- | --- |
+| GET /vtpass/categories | Read sandbox service categories. |
+| GET /vtpass/services?identifier=airtime | Read the available providers for the selected category. |
+| GET /vtpass/variations?serviceID=... | Read available data or TV packages. |
+| POST /vtpass/verify | Verify an electricity meter or TV smartcard. |
+| POST /vtpass/quote | Create a time-limited NGN, USD and testnet-token quote. |
+| POST /vtpass/purchases | Create an authenticated merchant purchase tied to one payment link and quote. |
+| GET /vtpass/purchases/{id} | Read purchase and provider status. |
+| POST /vtpass/purchases/{id}/fulfill | Start or reconcile fulfillment after verified payment settlement. |
 
 <a id="receipts"></a>
 
