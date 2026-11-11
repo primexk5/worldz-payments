@@ -99,7 +99,7 @@ export function TokenSvg({
   symbol: string;
   className?: string;
 }) {
-  const norm = symbol.toUpperCase().trim();
+  const norm = symbol.toUpperCase().trim().replace(/\.E$/, "");
   const id = useId();
 
   if (norm === "ETH" || norm === "WETH") {

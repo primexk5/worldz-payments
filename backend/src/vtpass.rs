@@ -375,6 +375,13 @@ fn parse_coinpaprika_near_usd_rate(
     })
 }
 
+fn supported_stable_symbol(symbol: &str) -> bool {
+    matches!(
+        symbol.to_ascii_uppercase().as_str(),
+        "USDC" | "USDC.E" | "USDT" | "USDT.E" | "DAI"
+    )
+}
+
 async fn token_usd_price(
     state: &AppState,
     asset: &AssetDto,
@@ -415,10 +422,7 @@ async fn token_usd_price(
                     "Token metadata changed. Refresh the supported asset list and request a new quote.",
                 ));
             }
-            if !matches!(
-                symbol.to_ascii_uppercase().as_str(),
-                "USDC" | "USDT" | "DAI"
-            ) {
+            if !supported_stable_symbol(symbol) {
                 return Err(ApiError::bad_request(
                     "VTpass sandbox checkout supports NEAR, USDC, USDT, or DAI.",
                 ));
@@ -713,15 +717,13 @@ pub async fn create_purchase(
             contract_id,
             symbol,
             decimals,
-        } if matches!(
-            symbol.to_ascii_uppercase().as_str(),
-            "USDC" | "USDT" | "DAI"
-        ) && state
-            .config
-            .network(NetworkId::Testnet)
-            .ft_allowlist
-            .iter()
-            .any(|allowed| allowed == contract_id) =>
+        } if supported_stable_symbol(symbol)
+            && state
+                .config
+                .network(NetworkId::Testnet)
+                .ft_allowlist
+                .iter()
+                .any(|allowed| allowed == contract_id) =>
         {
             *decimals
         }
@@ -1009,7 +1011,8 @@ mod tests {
     use super::{
         format_micros, format_ngn_minor, new_request_id, ngn_minor_to_usd_micros,
         parse_coinpaprika_near_usd_rate, parse_near_usd_rate, parse_ngn_minor, parse_usd_ngn_rate,
-        provider_state, usd_to_token_base_units, validate_service_id, STABLE_USD_MICROS,
+        provider_state, supported_stable_symbol, usd_to_token_base_units, validate_service_id,
+        STABLE_USD_MICROS,
     };
     use chrono::{TimeZone, Utc};
     use serde_json::json;
@@ -1071,6 +1074,27 @@ mod tests {
         assert_eq!(rate.rate_display, "1525.75");
         assert!(parse_usd_ngn_rate(&payload, now + 49 * 60 * 60).is_err());
         assert!(parse_usd_ngn_rate(&json!({"result":"error"}), now).is_err());
+    }
+
+    #[test]
+    fn service_payments_recognize_bridged_usdc_and_usdt_metadata() {
+        for symbol in ["USDC", "USDC.e", "usdc.e", "USDT", "USDT.e", "DAI"] {
+            assert!(
+                supported_stable_symbol(symbol),
+                "expected support for {symbol}"
+            );
+        }
+        for symbol in ["ETH", "NEAR", "USDC.fake", "USDT2", "", "DAI.e"] {
+            assert!(
+                !supported_stable_symbol(symbol),
+                "unexpected support for {symbol}"
+            );
+        }
+        // Both bridged tokens have six decimals and use the stable-token quote rate.
+        assert_eq!(
+            usd_to_token_base_units(2_000_000, 6, STABLE_USD_MICROS).unwrap(),
+            2_000_000
+        );
     }
 
     #[test]
