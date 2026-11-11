@@ -6,6 +6,7 @@ import { PrimaryAction, SecondaryAction } from "@/components/molecules/actions";
 import { HomeHero } from "@/components/organisms/home-hero";
 import { MobileDashboardPromotion } from "@/components/organisms/mobile-dashboard-promotion";
 import { DeveloperPromotion, PaymentLinksPromotion, ShopifyPromotion } from "@/components/organisms/product-promotions";
+import { CrossChainPromotion, SubscriptionPromotion } from "@/components/organisms/wallet-promotions";
 import { Card, CardContent } from "@/components/ui/card";
 
 const products = [
@@ -17,7 +18,7 @@ const questions = [
   ["Do you hold my funds or wallet keys?", "Your keys stay with you. WorldzPayments routes payments to your designated payout wallet. Order funds can remain in the payment contract while NEAR completes the merchant and fee payouts."],
   ["Do I need to write code to accept payments?", "No. Connect your NEAR wallet, create your merchant workspace and share a payment link from your dashboard. Developers can also integrate checkout through the merchant API."],
   ["When is a payment marked settled?", "A payment is marked settled after the merchant service verifies successful payout receipts. Submitting a wallet transaction starts processing; it does not by itself confirm settlement."],
-  ["Which assets can my customers use?", "Checkout supports native NEAR and the NEP-141 tokens enabled for the configured network. Each payment link specifies its asset and exact amount before a customer pays."],
+  ["Which assets can my customers use?", "Checkout supports native NEAR and the NEP-141 tokens enabled for the configured network. Each link specifies its asset and exact amount. Enabled mainnet cross-chain routes also let customers pay from Ethereum, Base, Arbitrum and Solana. Testnet swaps are simulated."],
   ["Can I download a receipt?", "Yes. Once a payment has verified settlement, its receipt is available in checkout and in your merchant payment history. Download a PDF with the amount, fee, payout account and settlement reference."],
 ];
 
@@ -32,6 +33,8 @@ export default function Home() {
 
     <ShopifyPromotion/>
     <PaymentLinksPromotion/>
+    <CrossChainPromotion/>
+    <SubscriptionPromotion/>
     <MobileDashboardPromotion/>
 
     <section id="settlement" className="border-y border-line bg-white/30"><div className="site-container site-section"><div className="grid gap-10 lg:grid-cols-[.9fr_1.1fr] lg:gap-20"><div><MonoLabel>Your keys. Your control.</MonoLabel><h2 className="site-heading mt-4">Your money has<br/>a <em className="font-serif font-normal italic text-green-deep">destination.</em></h2><p className="site-description mt-5 max-w-md">Your wallet. Every order shows where the funds go and gives you a clear view of what happened on-chain.</p><div className="mt-7 inline-flex items-center gap-2 rounded-full border border-line bg-paper px-4 py-2.5 text-xs"><NearLogo className="size-4"/>NEAR-native payments<ShieldCheck size={14} className="ml-3 text-ink/50"/></div></div>

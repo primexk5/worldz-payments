@@ -34,6 +34,8 @@ pub struct AppState {
     pub pool: PgPool,
     pub config: Arc<AppConfig>,
     pub http: Client,
+    #[cfg(test)]
+    pub vtpass_test_url: Option<String>,
     pub request_budget: Arc<crate::abuse::RequestBudget>,
     pub public_requests: Arc<tokio::sync::Semaphore>,
     pub usd_ngn_rate: Arc<tokio::sync::Mutex<Option<CachedUsdNgnRate>>>,
@@ -45,6 +47,8 @@ impl AppState {
     pub fn new(pool: PgPool, config: AppConfig) -> Self {
         Self {
             pool,
+            #[cfg(test)]
+            vtpass_test_url: None,
             config: Arc::new(config),
             request_budget: Arc::new(crate::abuse::RequestBudget::default()),
             public_requests: Arc::new(tokio::sync::Semaphore::new(32)),

@@ -15,6 +15,15 @@ use worldz_near_protocol::NetworkId;
 use crate::{auth, db::sqlx, error::ApiError, models::AssetDto, state::AppState};
 
 const SANDBOX_API: &str = "https://sandbox.vtpass.com/api";
+
+fn provider_url(_state: &AppState, path: &str) -> String {
+    // Test transport is compiled out of production: real requests stay sandbox-only.
+    #[cfg(test)]
+    if let Some(base) = &_state.vtpass_test_url {
+        return format!("{base}{path}");
+    }
+    format!("{SANDBOX_API}{path}")
+}
 const FX_RATE_URL: &str = "https://open.er-api.com/v6/latest/USD";
 const FX_SOURCE: &str = "open.er-api.com";
 const FX_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
@@ -46,7 +55,7 @@ async fn get(state: &AppState, path: &str) -> Result<Value, ApiError> {
     let (api_key, public_key, _) = configured(state)?;
     let response = state
         .http
-        .get(format!("{SANDBOX_API}{path}"))
+        .get(provider_url(state, path))
         .header("api-key", api_key)
         .header("public-key", public_key)
         .send()
@@ -71,7 +80,7 @@ async fn post(state: &AppState, path: &str, body: &Value) -> Result<Value, ApiEr
     let (api_key, _, secret_key) = configured(state)?;
     let response = state
         .http
-        .post(format!("{SANDBOX_API}{path}"))
+        .post(provider_url(state, path))
         .header("api-key", api_key)
         .header("secret-key", secret_key)
         .json(body)
@@ -921,10 +930,16 @@ pub async fn fulfill_purchase(
         .as_object_mut()
         .ok_or_else(ApiError::internal)?;
     object.insert("request_id".into(), json!(request_id));
-    object.insert(
-        "serviceID".into(),
-        row.try_get::<String, _>("service_id")?.into(),
-    );
+    let service_id: String = row.try_get("service_id")?;
+    // This checkout prices a selected catalog package. MultiChoice requires
+    // "change" for that flow; "renew" instead requires its verified renewal price.
+    if row.try_get::<String, _>("category")? == "tv"
+        && matches!(service_id.as_str(), "dstv" | "gotv")
+    {
+        object.insert("subscription_type".into(), json!("change"));
+        object.insert("quantity".into(), json!(1));
+    }
+    object.insert("serviceID".into(), service_id.into());
     object.insert(
         "amount".into(),
         row.try_get::<String, _>("amount_ngn")?.into(),
@@ -984,7 +999,7 @@ fn sanitize_response(response: &Value) -> Value {
     })
 }
 
-async fn update_from_provider(
+pub(super) async fn update_from_provider(
     state: &AppState,
     purchase_id: &str,
     response: &Value,
@@ -1001,7 +1016,9 @@ async fn update_from_provider(
     } else {
         ""
     };
-    sqlx::query("UPDATE vtpass_service_purchases SET state=?,provider_transaction_id=COALESCE(?,provider_transaction_id),provider_response=?,failure_reason=NULLIF(?,''),updated_at=now() WHERE purchase_id=?")
+    // Concurrent requery responses can arrive after delivery. Terminal results
+    // must never be replaced by an older pending or ambiguous provider response.
+    sqlx::query("UPDATE vtpass_service_purchases SET state=?,provider_transaction_id=COALESCE(?,provider_transaction_id),provider_response=?,failure_reason=NULLIF(?,''),updated_at=now() WHERE purchase_id=? AND state NOT IN ('FULFILLED','FAILED')")
         .bind(status).bind(transaction_id).bind(sanitize_response(response)).bind(failure).bind(purchase_id).execute(&state.pool).await?;
     Ok(())
 }

@@ -18,7 +18,7 @@ use crate::oneclick::SwapOutcome;
 use crate::state::AppState;
 use worldz_near_protocol::NetworkId;
 
-fn config(database_url: String, mock_outcome: Option<&str>) -> AppConfig {
+pub(super) fn config(database_url: String, mock_outcome: Option<&str>) -> AppConfig {
     let network = NetworkConfig {
         rpc_url: "http://127.0.0.1:1".into(),
         rpc_fallback_urls: vec![],
@@ -60,7 +60,7 @@ fn config(database_url: String, mock_outcome: Option<&str>) -> AppConfig {
     }
 }
 
-async fn pool_for(url: &str, schema: &str) -> sqlx::PgPool {
+pub(super) async fn pool_for(url: &str, schema: &str) -> sqlx::PgPool {
     let admin = sqlx::PgPool::connect(url).await.unwrap();
     sqlx::query(&format!("CREATE SCHEMA {schema}"))
         .execute(&admin)

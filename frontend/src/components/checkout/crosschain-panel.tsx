@@ -8,7 +8,7 @@ import { nearApi } from "@/lib/near/api";
 import { formatAssetAmount } from "@/lib/near/tokens";
 import { discoverEvmWallets, connectEvmWallet } from "@/lib/crosschain/evm";
 import { connectSolanaWallet } from "@/lib/crosschain/solana";
-import type { AttemptStatus, CrossChainWallet, OneClickAttempt, OneClickQuote, OneClickToken } from "@/lib/crosschain/types";
+import type { CrossChainWallet, OneClickAttempt, OneClickQuote, OneClickToken } from "@/lib/crosschain/types";
 import type { PaymentLink } from "@/lib/near/types";
 
 type PanelState = "choose" | "quoted" | "depositing" | "processing" | "settled" | "closed";
@@ -33,7 +33,6 @@ export function CrossChainPanel({ slug, link, onSettled, onPaymentActiveChange }
   const [evmOptions, setEvmOptions] = useState<EvmOption[]>([]);
   const [quote, setQuote] = useState<OneClickQuote | null>(null);
   const [attempt, setAttempt] = useState<OneClickAttempt | null>(null);
-  const [status, setStatus] = useState<AttemptStatus | null>(null);
   const [submittedHash, setSubmittedHash] = useState<{ attemptId: string; hash: string } | null>(null);
   const [state, setState] = useState<PanelState>("choose");
   const [busy, setBusy] = useState(false);
@@ -63,7 +62,6 @@ export function CrossChainPanel({ slug, link, onSettled, onPaymentActiveChange }
     const tick = async () => {
       try {
         const current = await nearApi.oneclickAttempt(attempt.attemptId);
-        setStatus(current);
         if (current.status === "SETTLED" && current.orderState === "SETTLED") {
           setState("settled");
           onSettled(attempt.orderId, attempt.merchantId);
@@ -156,8 +154,7 @@ export function CrossChainPanel({ slug, link, onSettled, onPaymentActiveChange }
         ? `0xsim-${attempt.attemptId}`
         : await wallet.sendTransfer({ depositAddress: attempt.depositAddress, amountRaw: attempt.amountIn, origin, sender: wallet.address });
     setSubmittedHash({ attemptId: attempt.attemptId, hash: txHash });
-    const submitted = await nearApi.oneclickSubmitDeposit(attempt.attemptId, txHash);
-    setStatus({ attemptId: attempt.attemptId, status: submitted.status as AttemptStatus["status"], orderState: submitted.orderState, txHash, failureReason: null, simulated: submitted.simulated });
+    await nearApi.oneclickSubmitDeposit(attempt.attemptId, txHash);
     setState("processing");
   });
 
@@ -184,9 +181,9 @@ export function CrossChainPanel({ slug, link, onSettled, onPaymentActiveChange }
       <p className="mt-2 text-xs leading-5 text-mist">
         {mode === "mock"
           ? "Sandbox payment with current market prices. No real funds are sent."
-          : `A NEAR Intents swap pays the merchant on NEAR from ${link.networkId}. Refunds go back to your wallet if the swap fails.`}
+          : "Pay from your wallet. The merchant receives tokens on NEAR."}
       </p>
-      {error && <p role="alert" className="mt-3 rounded-xl border border-alert/20 bg-alert/5 p-3 text-xs leading-5 text-alert">{error}</p>}
+      {error && <p role="alert" className="mt-3 text-xs leading-5 text-alert">{error}</p>}
       {state === "choose" && (
         <>
           {!wallet ? (
@@ -241,16 +238,12 @@ export function CrossChainPanel({ slug, link, onSettled, onPaymentActiveChange }
         <div className="mt-4 rounded-xl bg-paper p-4">
           <p className="text-xs font-medium">{state === "depositing" ? "Review and approve in your wallet" : "Payment progress"}</p>
           <p className="mt-2 break-words font-mono text-sm">{formatAssetAmount(attempt.amountIn, originAssetOf(origin!))}</p>
-          <p className="mt-2 text-xs leading-5 text-ink/60">{attempt.simulated ? "Sandbox payment using current market prices. No real funds will be sent." : `Approve the payment in ${wallet?.name ?? "your wallet"}. Your wallet handles the transfer automatically.`}</p>
           {state === "depositing" && <button onClick={() => void sendDeposit()} disabled={busy} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-ink px-4 py-3 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin"/> : <WalletCards size={15}/>} {submittedHash ? "Check submitted payment" : attempt.simulated ? "Confirm simulated payment" : `Approve in ${wallet?.name ?? "wallet"}`}</button>}
           {state === "processing" && (
-            <div className="mt-3 rounded-xl border border-amber/40 bg-amber/10 p-3">
-              <div className="flex items-center gap-2 text-amber-800"><LoaderCircle size={15} className="animate-spin" /><p className="text-xs font-medium">{status?.status.replaceAll("_", " ") ?? "PENDING DEPOSIT"}</p></div>
-              <p className="mt-2 text-xs leading-5 text-ink/60">Your payment was submitted. Keep this checkout open while we confirm the merchant payout on NEAR.</p>
-            </div>
+            <p role="status" className="mt-3 flex items-center gap-2 text-xs text-ink/60"><LoaderCircle size={14} className="shrink-0 animate-spin"/>Confirming payment… Please don’t pay again.</p>
           )}
           {state === "settled" && <div className="mt-3 flex items-center gap-2 rounded-xl border border-green-deep/20 bg-green-deep/5 p-3 text-xs font-medium text-green-deep"><Check size={15} />Cross-chain payment settled on NEAR.</div>}
-          {(state === "closed" || state === "settled") && <button onClick={() => { setOpen(false); setState("choose"); setAttempt(null); setQuote(null); setStatus(null); }} className="mt-3 w-full text-center text-[11px] text-mist underline">Close</button>}
+          {(state === "closed" || state === "settled") && <button onClick={() => { setOpen(false); setState("choose"); setAttempt(null); setQuote(null); }} className="mt-3 w-full text-center text-[11px] text-mist underline">Close</button>}
         </div>
       )}
     </section>

@@ -8,9 +8,8 @@ import { useNearWallet } from "@/components/providers/near-wallet-provider";
 import { nearApi, type VtpassPurchaseStatus } from "@/lib/near/api";
 import { claimPaymentLinkWithNearWallet } from "@/lib/near/auth";
 import { NEAR_EXPLORER_URL, NEAR_NATIVE_ASSET, NEAR_NETWORK_ID } from "@/lib/near/config";
-import { formatUnitsExact } from "@/lib/near/amounts";
-import { getPendingPaymentForSlug, isVerifiedSettlement, registerFungibleTokenRecipients, savePendingPayment, submitAuthorizedPayment, TokenStorageRequiredError, type PendingPayment } from "@/lib/near/payment";
-import { formatAssetAmount } from "@/lib/near/tokens";
+import { formatUnitsDisplay, formatUnitsExact } from "@/lib/near/amounts";
+import { clearPendingPayment, getPendingPaymentForSlug, isVerifiedSettlement, registerFungibleTokenRecipients, savePendingPayment, submitAuthorizedPayment, TokenStorageRequiredError, type PendingPayment } from "@/lib/near/payment";
 import type { AllowedFungibleToken, LinkClaim, NearAsset, OrderStatus, PaymentLink } from "@/lib/near/types";
 
 type Category = "airtime" | "data" | "electricity" | "tv";
@@ -24,7 +23,7 @@ const categories: { id: Category; label: string; identifier: string; help: strin
   { id: "airtime", icon: Smartphone, subtitle: "Top up & talk", label: "Airtime", identifier: "airtime", help: "Top up a Nigerian mobile number." },
   { id: "data", icon: Wifi, subtitle: "Stay connected", label: "Data", identifier: "data", help: "Choose a data bundle for a Nigerian network." },
   { id: "electricity", icon: Zap, subtitle: "Keep the lights on", label: "Electricity", identifier: "electricity-bill", help: "Pay a prepaid or postpaid electricity meter." },
-  { id: "tv", icon: Tv, subtitle: "More to watch", label: "TV subscription", identifier: "tv-subscription", help: "Choose a one-time TV package renewal." },
+  { id: "tv", icon: Tv, subtitle: "More to watch", label: "TV subscription", identifier: "tv-subscription", help: "Choose a TV package for your smartcard." },
 ];
 
 function naira(value: string) {
@@ -46,7 +45,11 @@ function VerifiedAccount({ result }: { result: Record<string, unknown> }) {
 }
 
 function providerError(error: unknown): string {
-  return error instanceof Error ? error.message : "VTpass sandbox request failed.";
+  const message = error instanceof Error ? error.message : "";
+  if (/closed.*window|user.*reject|user.*denied|cancel/i.test(message)) return "Payment cancelled. You can try again.";
+  if (/fetch|network|unavailable|invalid response|request failed|not configured/i.test(message)) return "Service unavailable. Please try again shortly.";
+  const firstLine = message.split(/\n|\. /)[0];
+  return firstLine && firstLine.length <= 160 ? `${firstLine.replace(/\.$/, "")}.` : "Couldn’t complete this step. Please try again.";
 }
 
 export default function NigeriaServicesPage() {
@@ -78,6 +81,7 @@ export default function NigeriaServicesPage() {
   const [storageIssue, setStorageIssue] = useState<TokenStorageRequiredError | null>(null);
   const [transactionHash, setTransactionHash] = useState("");
   const checking = useRef(false);
+  const paymentVerified = order ? isVerifiedSettlement(order) : false;
 
   const selectedToken = useMemo<NearAsset | null>(() => {
     if (tokenContract === "native:NEAR") return NEAR_NATIVE_ASSET;
@@ -104,7 +108,7 @@ export default function NigeriaServicesPage() {
     setTokens(result.stable);
     setTokenContract((current) => current === "native:NEAR" || result.stable.some((token) => token.contractId === current) ? current : "native:NEAR");
     if (result.error || result.missing.length) {
-      setAssetError(result.error ?? `${result.missing.join(" and ")} ${result.missing.length === 1 ? "is" : "are"} not enabled or available on this testnet. Check the backend and router token allowlists.`);
+      setAssetError(result.error ?? `${result.missing.join(" and ")} currently unavailable.`);
     } else {
       setAssetError(null);
     }
@@ -122,8 +126,12 @@ export default function NigeriaServicesPage() {
     void Promise.all([nearApi.vtpassPurchase(saved.purchaseId), nearApi.link(saved.slug).catch(() => null)]).then(([purchase, link]) => {
       if (!active) return;
       if (purchase.linkSlug !== saved.slug || (link && link.merchantId !== saved.merchantId)) throw new Error("Saved service checkout does not match the purchase.");
-      if (!link && !saved.orderId) throw new Error("This service quote expired. Request a new quote.");
-      setServiceStatus(purchase); setCheckoutLink(link); setCheckout(saved);
+      if (!link && !saved.orderId && !getPendingPaymentForSlug(saved.slug)) throw new Error("This service quote expired. Request a new quote.");
+      setServiceStatus(purchase); setCheckoutLink(link);
+      const recoveredOrderId = saved.orderId ?? getPendingPaymentForSlug(saved.slug)?.orderId;
+      const recovered = { ...saved, orderId: recoveredOrderId };
+      window.sessionStorage.setItem(CHECKOUT_KEY, JSON.stringify(recovered));
+      setCheckout(recovered);
       const restored = getPendingPaymentForSlug(saved.slug);
       if (restored) {
         const callbackHash = new URLSearchParams(window.location.search).get("transactionHashes")?.split(",")[0];
@@ -135,7 +143,7 @@ export default function NigeriaServicesPage() {
   }, []);
 
   useEffect(() => {
-    if ((!checkout?.orderId && !pending) || serviceStatus?.state === "FULFILLED" || serviceStatus?.state === "FAILED") return;
+    if ((!checkout?.orderId && !pending) || (paymentVerified && (serviceStatus?.state === "FULFILLED" || serviceStatus?.state === "FAILED"))) return;
     let active = true;
     const refresh = async () => {
       if (checking.current || !active) return;
@@ -148,11 +156,12 @@ export default function NigeriaServicesPage() {
         if (isVerifiedSettlement(status)) {
           try {
             await nearApi.vtpassFulfill(checkout!.purchaseId);
-            if (active) setServiceStatus(await nearApi.vtpassPurchase(checkout!.purchaseId));
+            if (active) { setServiceStatus(await nearApi.vtpassPurchase(checkout!.purchaseId)); setError(null); if (current) clearPendingPayment(current); }
           }
           catch (cause) { if (active) setError(providerError(cause)); }
         } else if (status.state === "OPEN" && status.failureReason) {
-          setError(status.failureReason);
+          setError(providerError(new Error(status.failureReason)));
+          if (current) clearPendingPayment(current);
           setPending(null);
         }
       } catch (cause) { if (active) setError(providerError(cause)); }
@@ -161,7 +170,7 @@ export default function NigeriaServicesPage() {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 5000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [checkout, pending, serviceStatus?.state]);
+  }, [checkout, pending, serviceStatus?.state, paymentVerified]);
 
   useEffect(() => {
     let active = true;
@@ -228,6 +237,7 @@ export default function NigeriaServicesPage() {
     if (quote.expiresAtSeconds <= Math.floor(Date.now() / 1000)) { setQuote(null); setError("Quote expired. Request a fresh quote."); return; }
     setBusy(true); setError(null);
     let slug: string | null = null;
+    let purchaseCreated = false;
     try {
       const created = await nearApi.createLink({
         networkId: NEAR_NETWORK_ID,
@@ -252,12 +262,13 @@ export default function NigeriaServicesPage() {
         variationCode: category === "electricity" ? meterType : variationCode || undefined,
         providerFields,
       });
+      purchaseCreated = true;
       const current = { purchaseId: purchase.purchaseId, slug: created.slug, merchantId: created.merchantId };
       window.sessionStorage.setItem(CHECKOUT_KEY, JSON.stringify(current));
       setCheckout(current); setCheckoutLink(created);
       setServiceStatus({ ...purchase, providerTransactionId: null, providerResponse: null, failureReason: null } as VtpassPurchaseStatus);
     } catch (cause) {
-      if (slug) void nearApi.deleteLink(slug).catch(() => undefined);
+      if (slug && !purchaseCreated) void nearApi.deleteLink(slug).catch(() => undefined);
       setError(providerError(cause));
     } finally { setBusy(false); }
   };
@@ -301,6 +312,7 @@ export default function NigeriaServicesPage() {
 
   const startAgain = () => {
     window.sessionStorage.removeItem(CHECKOUT_KEY);
+    setStorageIssue(null); setTransactionHash("");
     setCheckout(null); setCheckoutLink(null); setOrder(null); setPending(null); setServiceStatus(null); setClaim(null);
     setQuote(null); setError(null);
   };
@@ -317,36 +329,35 @@ export default function NigeriaServicesPage() {
       <div><p className="flex items-center gap-2 text-[11px] font-medium text-ink/50"><Globe2 size={13}/>EVERYDAY PAYMENTS <span className="text-ink/20">/</span> NIGERIA</p><h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Bills & subscriptions</h1><p className="mt-3 max-w-lg text-sm leading-6 text-ink/55">A little data. A full recharge. Your everyday essentials, paid from your wallet.</p></div>
       <span className="inline-flex items-center gap-2 rounded-full border border-line bg-white px-3 py-2 text-xs font-medium"><span aria-hidden="true" className="flex h-3 w-4 overflow-hidden rounded-[2px]"><span className="w-1/3 bg-green-700"/><span className="w-1/3 bg-white"/><span className="w-1/3 bg-green-700"/></span>Nigeria<span className="ml-1 size-1.5 rounded-full bg-green-deep"/></span>
     </header>
-    <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-xs leading-5 text-amber-900"><CircleAlert size={15} className="mt-0.5 shrink-0"/><p><span className="font-semibold">Testnet preview.</span> Try the flow with test tokens. No real airtime, data, electricity, or TV service is delivered.</p></div>
+    <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-amber/30 bg-amber/10 px-4 py-3 text-xs leading-5 text-amber-900"><CircleAlert size={15} className="mt-0.5 shrink-0"/><p><span className="font-semibold">Testnet preview.</span> Test tokens only. No real services are delivered.</p></div>
 
-    {checkout ? <div className="mt-6 rounded-[24px] border border-line bg-white p-5 sm:p-7">
+    {checkout ? <div className="mx-auto mt-6 max-w-xl rounded-[24px] border border-line bg-white p-5 sm:p-7">
       <p className="font-mono text-[10px] uppercase tracking-[.14em] text-mist">Nigeria · VTpass sandbox · NEAR testnet</p>
       <h2 className="mt-2 text-xl font-semibold">{order && isVerifiedSettlement(order) ? "Service receipt" : "Review your service"}</h2>
       <p className="mt-1 text-xs leading-5 text-mist">{checkoutLink?.displayName ?? serviceStatus?.serviceID ?? "Your service purchase"}</p>
       <div className="mt-5 rounded-2xl bg-paper p-5">
         <div className="flex justify-between gap-3 text-xs"><span className="text-mist">VTpass amount</span><span className="font-mono">₦{serviceStatus?.amountNgn ?? "—"}</span></div>
-        <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Locked USD quote</span><span className="font-mono">${serviceStatus?.amountUsd ?? "—"}</span></div>
-        {checkoutLink && <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Testnet wallet payment</span><span className="font-mono">{formatAssetAmount(checkoutLink.amount, checkoutLink.asset)}</span></div>}
+        <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">USD equivalent</span><span className="font-mono">${serviceStatus?.amountUsd ?? "—"}</span></div>
+        {checkoutLink && <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Testnet wallet payment</span><span className="font-mono">{`${formatUnitsDisplay(checkoutLink.amount, checkoutLink.asset.decimals)} ${checkoutLink.asset.symbol}`}</span></div>}
       </div>
+      {checkoutLink && <details className="mt-3 text-[11px] text-mist"><summary className="cursor-pointer">Exact payment amount</summary><p className="mt-2 break-all font-mono">{formatUnitsExact(checkoutLink.amount, checkoutLink.asset.decimals)} {checkoutLink.asset.symbol}</p></details>}
       {order && isVerifiedSettlement(order) ? <div className="mt-5 space-y-4" aria-live="polite">
-        <div className="flex items-center gap-2 text-sm font-medium text-green-deep"><Check size={17}/>Wallet payment verified</div>
-        <div className="rounded-xl border border-line p-4 text-xs"><span className="text-mist">VTpass fulfillment: </span><span className="font-medium">{serviceStatus?.state?.replaceAll("_", " ") ?? "Checking provider…"}</span></div>
+        {!error && <p role="status" className="flex items-center gap-2 text-sm font-medium text-green-deep">{serviceStatus?.state === "FULFILLED" ? <Check size={17}/> : serviceStatus?.state !== "FAILED" ? <LoaderCircle size={17} className="animate-spin"/> : <CircleAlert size={17}/>} {serviceStatus?.state === "FULFILLED" ? "Service confirmed." : serviceStatus?.state === "FAILED" ? "Service unsuccessful. Payment verified." : "Payment verified. Confirming your service…"}</p>}
         {serviceStatus?.providerResponse?.purchasedCode && <div className="rounded-xl border border-line p-4 text-xs"><p className="text-mist">Purchased code / electricity token</p><p className="mt-2 break-all font-mono">{serviceStatus.providerResponse.purchasedCode}</p></div>}
-        {serviceStatus?.providerTransactionId && <p className="text-xs text-mist">VTpass reference: <span className="font-mono">{serviceStatus.providerTransactionId}</span></p>}
-        {serviceStatus?.failureReason && <p className="rounded-xl border border-alert/20 bg-alert/5 p-4 text-xs text-alert">{serviceStatus.failureReason}</p>}
+        {serviceStatus?.providerTransactionId && <details className="text-xs text-mist"><summary className="cursor-pointer">Receipt reference</summary><p className="mt-2 break-all font-mono">{serviceStatus.providerTransactionId}</p></details>}
+        {serviceStatus?.failureReason && !error && <p role="alert" className="text-xs text-alert">{providerError(new Error(serviceStatus.failureReason))}</p>}
         {order.transactionHash && <a href={`${NEAR_EXPLORER_URL}/txns/${encodeURIComponent(order.transactionHash)}`} target="_blank" rel="noreferrer" className="inline-flex text-xs text-green-deep underline">View NEAR testnet transaction</a>}
         <p className="text-[11px] text-mist">Sandbox receipt only · no real service is delivered.</p>
         <button type="button" onClick={startAgain} className="block rounded-full border border-line px-5 py-3 text-xs font-medium">Make another purchase</button>
       </div> : <div className="mt-5 space-y-4">
-        {order && <p className="rounded-xl bg-paper p-4 text-xs">Wallet payment: {order.state.replaceAll("_", " ")}. {order.failureReason ?? "Check the status here before paying again."}</p>}
-        {pending && <p className="rounded-xl border border-amber/40 bg-amber/10 p-4 text-xs">Payment is being verified. Do not submit it again while processing.</p>}
-        {pending && !pending.transactionHash && <div className="rounded-xl border border-line p-4"><label className="text-xs font-medium">Wallet transaction hash<input value={transactionHash} onChange={(event) => setTransactionHash(event.target.value)} className="mt-2 h-10 w-full rounded-xl border border-line px-3 text-xs"/></label><button onClick={() => void recoverPayment()} disabled={!transactionHash.trim()} className="mt-3 text-xs text-green-deep underline disabled:opacity-50">Check transaction</button></div>}
+        {!error && (pending || order) && <p role="status" className="flex items-center gap-2 text-xs text-ink/60">{pending && <LoaderCircle size={14} className="animate-spin"/>}{pending ? "Confirming payment… Please don’t pay again." : `Payment ${order!.state.toLowerCase().replaceAll("_", " ")}.`}</p>}
+        {pending && !pending.transactionHash && <details className="text-xs text-mist"><summary className="cursor-pointer">Find a missing wallet transaction</summary><div className="mt-3 rounded-xl border border-line p-4"><label className="text-xs font-medium">Wallet transaction hash<input value={transactionHash} onChange={(event) => setTransactionHash(event.target.value)} className="mt-2 h-10 w-full rounded-xl border border-line px-3 text-xs"/></label><button onClick={() => void recoverPayment()} disabled={!transactionHash.trim()} className="mt-3 text-xs text-green-deep underline disabled:opacity-50">Check transaction</button></div></details>}
         {storageIssue && <button type="button" onClick={() => void registerStorage()} disabled={busy} className="rounded-full border border-line px-5 py-3 text-xs font-medium disabled:opacity-50">Register token accounts ({storageIssue.accountIds.length})</button>}
-        {!pending && <button type="button" onClick={() => void payService()} disabled={busy || connecting || !checkoutLink || (order != null && order.state !== "OPEN")} className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-white disabled:opacity-50">{busy || connecting ? <LoaderCircle size={15} className="animate-spin"/> : <ArrowRight size={15}/>} {accountId ? "Approve testnet payment" : "Connect wallet"}</button>}
+        {!pending && <button type="button" onClick={() => void payService()} disabled={busy || connecting || !checkoutLink || (!!checkout.orderId && !order) || (order != null && order.state !== "OPEN")} className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-white disabled:opacity-50">{busy || connecting ? <LoaderCircle size={15} className="animate-spin"/> : <ArrowRight size={15}/>} {accountId ? "Approve testnet payment" : "Connect wallet"}</button>}
         {!checkoutLink && !pending && (!order || order.state === "OPEN" || order.state === "REFUNDED") && <button type="button" onClick={startAgain} className="text-xs text-green-deep underline">Start a new quote</button>}
-        <p className="text-[11px] text-mist">Payment is routed to the configured workspace wallet; VTpass sandbox fulfillment begins only after verified settlement.</p>
+        <p className="text-[11px] text-mist">Your wallet confirms the amount before you pay.</p>
       </div>}
-      {error && <p role="alert" className="mt-4 rounded-xl border border-alert/20 bg-alert/5 p-4 text-xs text-alert">{error}</p>}
+      {error && <p role="alert" className="mt-4 text-xs leading-5 text-alert">{error}</p>}
     </div> : <>
 
     <div aria-label="Choose a service" className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">{categories.map((item) => {
@@ -372,11 +383,11 @@ export default function NigeriaServicesPage() {
       <aside aria-label="Payment summary" className="min-w-0 space-y-4 lg:sticky lg:top-6">
         <div className="overflow-hidden rounded-[24px] border border-vault bg-vault text-white shadow-[0_8px_30px_rgba(7,56,46,.08)]">
           <div className="border-b border-white/10 p-5 sm:p-6"><p className="text-[10px] font-medium uppercase tracking-[.16em] text-white/55">Your payment</p><div className="mt-5 flex items-end justify-between gap-3"><div className="min-w-0"><p className="text-[11px] text-white/55">Service amount</p><p className="mt-1 break-words text-3xl font-semibold tracking-tight">{naira(quote?.amountNgn ?? purchaseAmount)}</p></div><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-white/10 text-signal"><CategoryIcon size={21}/></span></div><dl className="mt-5 space-y-3 text-xs"><div className="flex justify-between gap-4"><dt className="shrink-0 text-white/50">Service</dt><dd className="text-right">{currentCategory.label}</dd></div><div className="flex justify-between gap-4"><dt className="shrink-0 text-white/50">Provider</dt><dd className="min-w-0 break-words text-right">{selectedService?.name ?? "Choose a provider"}</dd></div>{selectedVariation && <div className="flex justify-between gap-4"><dt className="shrink-0 text-white/50">Package</dt><dd className="min-w-0 break-words text-right leading-5">{selectedVariation.name}</dd></div>}<div className="flex justify-between gap-4"><dt className="shrink-0 text-white/50">{needsCustomerNumber ? "Account" : "Recipient"}</dt><dd className="break-all text-right font-mono">{(needsCustomerNumber ? customerNumber : phone) || "—"}</dd></div></dl></div>
-          <div className="p-5 sm:p-6">{quote ? <><div className="flex items-center justify-between gap-3"><span className="text-xs text-white/55">USD equivalent</span><span className="font-mono text-sm">${quote.amountUsd}</span></div><div className="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3"><TokenLogo symbol={quote.asset.symbol} icon={tokens.find((token) => token.contractId === tokenContract)?.icon} className="size-9"/><div className="min-w-0"><p className="text-[10px] text-white/55">You pay on testnet</p><p className="mt-1 break-all font-mono text-sm font-medium">{formatAssetAmount(quote.tokenAmountBaseUnits, quote.asset)}</p></div><BadgeCheck size={16} className="ml-auto shrink-0 text-signal"/></div><p className="mt-3 flex items-center gap-1.5 text-[10px] text-white/55"><Clock3 size={12}/>Quote expires at {new Date(quote.expiresAtSeconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p><button type="button" onClick={() => accountId ? void continueToPayment() : void connect().catch((cause) => setError(providerError(cause)))} disabled={busy || connecting} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-signal px-4 py-3 text-sm font-semibold text-vault transition hover:bg-signal/90 disabled:opacity-50">{busy || connecting ? <LoaderCircle size={16} className="animate-spin"/> : <WalletCards size={16}/>} {accountId ? "Review payment" : "Connect NEAR wallet"}<ArrowRight size={15}/></button><button type="button" disabled={busy} onClick={() => setQuote(null)} className="mt-3 w-full py-1 text-center text-[11px] text-white/60 underline underline-offset-4 disabled:opacity-50">Update quote</button><details className="mt-4 border-t border-white/10 pt-3 text-[10px] leading-5 text-white/55"><summary className="cursor-pointer">Exchange rate details</summary><p className="mt-2">{naira(quote.exchangeRateNgnPerUsd)}/USD · {quote.fxSource}. Updated {new Date(quote.fxSourceUpdatedAtSeconds * 1000).toLocaleString()}.</p><p>{quote.asset.symbol}: ${quote.tokenUsdPrice} · {quote.tokenPriceSource}. Updated {new Date(quote.tokenPriceUpdatedAtSeconds * 1000).toLocaleString()}.</p></details></> : <><div className="flex items-center justify-between gap-3 text-xs"><span className="text-white/55">Payment token</span><span className="inline-flex items-center gap-2">{selectedToken && <TokenLogo symbol={selectedToken.symbol} icon={tokens.find((token) => token.contractId === tokenContract)?.icon} className="size-5"/>}{selectedToken?.symbol ?? "—"}</span></div><p className="mt-4 text-xs leading-5 text-white/55">Your wallet amount appears after you request a quote. The rate is held for 10 minutes.</p><button type="button" onClick={() => void getQuote()} disabled={busy || loadingCatalog || !selectedToken || !serviceId || (needsVariation && !selectedVariation)} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-signal px-4 py-3 text-sm font-semibold text-vault transition hover:bg-signal/90 disabled:opacity-50">{busy ? <LoaderCircle size={16} className="animate-spin"/> : <ArrowRight size={16}/>}Get payment quote</button></>}
-          {error && <p role="alert" className="mt-4 rounded-xl border border-red-200/30 bg-red-100 p-3 text-xs leading-5 text-red-900">{error}</p>}
+          <div className="p-5 sm:p-6">{quote ? <><div className="flex items-center justify-between gap-3"><span className="text-xs text-white/55">USD equivalent</span><span className="font-mono text-sm">${quote.amountUsd}</span></div><div className="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3"><TokenLogo symbol={quote.asset.symbol} icon={tokens.find((token) => token.contractId === tokenContract)?.icon} className="size-9"/><div className="min-w-0"><p className="text-[10px] text-white/55">You pay on testnet</p><p className="mt-1 break-all font-mono text-sm font-medium">{`${formatUnitsDisplay(quote.tokenAmountBaseUnits, quote.asset.decimals)} ${quote.asset.symbol}`}</p></div><BadgeCheck size={16} className="ml-auto shrink-0 text-signal"/></div><p className="mt-3 flex items-center gap-1.5 text-[10px] text-white/55"><Clock3 size={12}/>Quote expires at {new Date(quote.expiresAtSeconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p><button type="button" onClick={() => accountId ? void continueToPayment() : void connect().catch((cause) => setError(providerError(cause)))} disabled={busy || connecting} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-signal px-4 py-3 text-sm font-semibold text-vault transition hover:bg-signal/90 disabled:opacity-50">{busy || connecting ? <LoaderCircle size={16} className="animate-spin"/> : <WalletCards size={16}/>} {accountId ? "Review payment" : "Connect NEAR wallet"}<ArrowRight size={15}/></button><button type="button" disabled={busy} onClick={() => setQuote(null)} className="mt-3 w-full py-1 text-center text-[11px] text-white/60 underline underline-offset-4 disabled:opacity-50">Update quote</button><details className="mt-4 border-t border-white/10 pt-3 text-[10px] leading-5 text-white/55"><summary className="cursor-pointer">Amount & exchange rate details</summary><p className="mt-2 break-all">Exact amount: {formatUnitsExact(quote.tokenAmountBaseUnits, quote.asset.decimals)} {quote.asset.symbol}</p><p className="mt-2">{naira(quote.exchangeRateNgnPerUsd)}/USD · {quote.fxSource}. Updated {new Date(quote.fxSourceUpdatedAtSeconds * 1000).toLocaleString()}.</p><p>{quote.asset.symbol}: ${quote.tokenUsdPrice} · {quote.tokenPriceSource}. Updated {new Date(quote.tokenPriceUpdatedAtSeconds * 1000).toLocaleString()}.</p></details></> : <><div className="flex items-center justify-between gap-3 text-xs"><span className="text-white/55">Payment token</span><span className="inline-flex items-center gap-2">{selectedToken && <TokenLogo symbol={selectedToken.symbol} icon={tokens.find((token) => token.contractId === tokenContract)?.icon} className="size-5"/>}{selectedToken?.symbol ?? "—"}</span></div><p className="mt-4 text-xs leading-5 text-white/55">Get a quote to see your wallet amount.</p><button type="button" onClick={() => void getQuote()} disabled={busy || loadingCatalog || !selectedToken || !serviceId || (needsVariation && !selectedVariation)} className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-signal px-4 py-3 text-sm font-semibold text-vault transition hover:bg-signal/90 disabled:opacity-50">{busy ? <LoaderCircle size={16} className="animate-spin"/> : <ArrowRight size={16}/>}Get payment quote</button></>}
+          {error && <p role="alert" className="mt-4 text-xs leading-5 text-red-200">{error}</p>}
           </div>
         </div>
-        <div className="rounded-2xl border border-line bg-white p-5"><div className="flex items-center gap-2 text-xs font-semibold text-vault"><ShieldCheck size={16}/>You approve every payment</div><p className="mt-2 text-xs leading-6 text-ink/50">Connect your wallet, review the amount, and approve. These are one-time purchases with no automatic renewals.</p><div className="mt-4 flex items-center gap-2 border-t border-line/70 pt-3 text-[10px] text-ink/45"><LockKeyhole size={12}/>Your wallet keys stay with you.</div></div>
+        <div className="rounded-2xl border border-line bg-white p-5"><div className="flex items-center gap-2 text-xs font-semibold text-vault"><ShieldCheck size={16}/>You approve every payment</div><p className="mt-2 text-xs leading-6 text-ink/50">One-time purchases. No automatic renewals.</p><div className="mt-4 flex items-center gap-2 border-t border-line/70 pt-3 text-[10px] text-ink/45"><LockKeyhole size={12}/>Your wallet keys stay with you.</div></div>
       </aside>
     </div></>}
   </section>;

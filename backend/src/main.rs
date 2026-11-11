@@ -16,6 +16,8 @@ mod security_tests;
 mod shopify;
 mod state;
 mod vtpass;
+#[cfg(test)]
+mod vtpass_db_tests;
 mod webhooks;
 mod workers;
 

@@ -99,7 +99,7 @@ export function DeveloperPromotion() {
   return (
     <section id="docs" className="border-y border-line bg-white/40">
       <div className="site-container site-section">
-        <div className="mb-10 flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5"><MonoLabel>03 / For what you’re building</MonoLabel><span className="flex items-center gap-2 text-xs text-ink/60"><Code2 size={15}/>SDK & developer tools</span></div>
+        <div className="mb-10 flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5"><MonoLabel>05 / For what you’re building</MonoLabel><span className="flex items-center gap-2 text-xs text-ink/60"><Code2 size={15}/>SDK & developer tools</span></div>
         <div className="grid items-center gap-12 lg:grid-cols-[.9fr_1.1fr] lg:gap-16">
           <div><h2 className="site-heading">Your product.<br/>Our payment <em className="font-serif font-normal italic text-green-deep">primitives.</em></h2><p className="site-description mt-5 max-w-md">Build a payment experience that fits your business. Start with the TypeScript source client, connect your checkout and follow each payment through to verified settlement.</p>
             <div className="mt-7 space-y-4">{[["TypeScript source client", "Payment links, order status and receipt metadata."], ["Wallet & payment helpers", "Wallet sign-in, exact amounts and settlement checks."], ["REST API reference", "Documented requests for your own integration."]].map(([title, text]) => <div key={title} className="flex gap-3"><Check className="mt-0.5 size-4 shrink-0 text-green-deep"/><div><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-ink/60">{text}</p></div></div>)}</div>

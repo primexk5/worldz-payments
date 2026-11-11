@@ -34,3 +34,7 @@ The mobile app is a separate workstream from walletless fiat checkout.
 All roadmap additions are planned. Current hosted checkout requires a NEAR wallet.
 
 These are planning estimates rather than committed delivery dates. External approval time is additional to engineering time. Walletless checkout scope and timing depend on provider selection and the agreed custody, settlement and approval requirements.
+
+## Planned bills and subscriptions expansion
+
+The current Nigeria VTpass integration is a sandbox preview for airtime, data, electricity and one-time TV package purchases. Planned expansion includes more countries and regional service providers, subject to provider availability, pricing and live fulfillment validation. Automatic recurring billing is not currently supported.
