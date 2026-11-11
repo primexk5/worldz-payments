@@ -1,8 +1,9 @@
 "use client";
 
 import { ArrowRight, Check, Coins, LoaderCircle, RefreshCcw, WalletCards } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MonoLabel } from "@/components/atoms/mono-label";
+import { OriginTokenSelect } from "@/components/checkout/origin-token-select";
 import { nearApi } from "@/lib/near/api";
 import { formatAssetAmount } from "@/lib/near/tokens";
 import { discoverEvmWallets, connectEvmWallet } from "@/lib/crosschain/evm";
@@ -122,6 +123,34 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
 
   const origin = tokens.find((token) => token.assetId === selected) ?? null;
 
+  const originTokens = useMemo(() => {
+    return tokens.filter((token) => {
+      // Exclude tokens on NEAR, as this panel is for paying from external chains into NEAR
+      if (token.blockchain === "near") return false;
+      if (!wallet) {
+        return ["eth", "base", "arb", "sol"].includes(token.blockchain);
+      }
+      if (wallet.kind === "evm") {
+        return ["eth", "base", "arb"].includes(token.blockchain);
+      }
+      if (wallet.kind === "solana") {
+        return token.blockchain === "sol";
+      }
+      return false;
+    });
+  }, [tokens, wallet]);
+
+  useEffect(() => {
+    if (originTokens.length === 0) {
+      if (selected) setSelected("");
+      return;
+    }
+    const isValid = originTokens.some((t) => t.assetId === selected);
+    if (!isValid) {
+      setSelected(originTokens[0].assetId);
+    }
+  }, [originTokens, selected]);
+
   const sendDeposit = () => run(async () => {
     if (!wallet || !attempt || !origin) return;
     const txHash = attempt.simulated
@@ -162,11 +191,15 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
         <>
           {!wallet ? (
             <>
-              <label htmlFor="crosschain-origin-asset" className="mt-4 block text-xs font-medium">Origin token</label>
-              <select id="crosschain-origin-asset" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={busy || tokens.length === 0} className="mt-2 h-11 w-full rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-ink/30 disabled:opacity-50">
-                <option value="">{tokens.length === 0 ? "Loading tokens…" : "Choose a token"}</option>
-                {tokens.map((token) => <option key={token.assetId} value={token.assetId}>{BLOCKCHAIN_LABELS[token.blockchain] ?? token.blockchain} · {token.symbol}</option>)}
-              </select>
+              <label className="mt-4 block text-xs font-medium">Origin token</label>
+              <div className="mt-2">
+                <OriginTokenSelect
+                  tokens={originTokens}
+                  value={selected}
+                  onChange={setSelected}
+                  disabled={busy}
+                />
+              </div>
               <p className="mt-4 text-xs font-medium">Connect a wallet</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {evmOptions.map((option) => <button key={option.name} onClick={() => void connect(option.connect)} disabled={busy} className="flex h-10 items-center gap-2 rounded-full border border-line bg-white px-4 text-xs font-medium transition hover:border-ink/30 disabled:opacity-50"><WalletCards size={14} />{option.name}</button>)}
@@ -180,11 +213,14 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
                 <span className="break-all font-mono text-[11px]">{wallet.address}</span>
               </div>
               <div className="mt-3 flex items-center gap-2">
-                <select aria-label="Origin token" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={busy} className="h-10 flex-1 rounded-xl border border-line bg-white px-3 text-sm outline-none focus:border-ink/30">
-                  <option value="">Choose a token</option>
-                  {tokens.map((token) => <option key={token.assetId} value={token.assetId}>{BLOCKCHAIN_LABELS[token.blockchain] ?? token.blockchain} · {token.symbol}</option>)}
-                </select>
-                <button onClick={() => void getQuote()} disabled={busy || !selected} className="flex h-10 items-center gap-2 rounded-full bg-ink px-4 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCcw size={14} />}Get quote</button>
+                <OriginTokenSelect
+                  tokens={originTokens}
+                  value={selected}
+                  onChange={setSelected}
+                  disabled={busy}
+                  className="flex-1"
+                />
+                <button onClick={() => void getQuote()} disabled={busy || !selected} className="flex h-11 items-center gap-2 rounded-full bg-ink px-4 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCcw size={14} />}Get quote</button>
               </div>
             </div>
           )}
