@@ -7,6 +7,7 @@ import { NearLogo } from "@/components/atoms/near-logo";
 import { BrandMark } from "@/components/atoms/brand-mark";
 import { MonoLabel } from "@/components/atoms/mono-label";
 import { NearReceipt } from "@/components/checkout/near-receipt";
+import { CrossChainPanel } from "@/components/checkout/crosschain-panel";
 import { useNearWallet } from "@/components/providers/near-wallet-provider";
 import { nearApi } from "@/lib/near/api";
 import { claimPaymentLinkWithNearWallet } from "@/lib/near/auth";
@@ -141,6 +142,14 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
     }catch(cause){setMessage(cause instanceof Error?cause.message:"Could not verify this transaction.");}
   };
 
+  const crossChainSettled=useCallback(async(orderId:string,merchantId:string)=>{
+    try{
+      const status=await nearApi.order(merchantId,orderId);
+      setOrder({...status,paymentDescription:status.paymentDescription??link?.displayName});
+      setState("settled");
+    }catch(cause){setMessage(cause instanceof Error?cause.message:"The payment settled, but the receipt could not be loaded.");}
+  },[link]);
+
   const registerStorage=async()=>{
     if(!wallet||!accountId||!claim||!storageIssue)return;
     setRegistering(true);setMessage(null);
@@ -169,6 +178,7 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
         {message&&<p role="alert" className="mt-4 rounded-xl border border-alert/20 bg-alert/5 p-3 text-xs leading-5 text-alert">{message}</p>}
         {storageIssue&&<div className="mt-4 rounded-xl border border-amber-500/25 bg-amber/10 p-4"><p className="text-xs leading-5">The token requires storage registration for {storageIssue.accountIds.length} receiving account(s). Required deposit is {formatAssetAmount(storageIssue.minimumDeposit,{type:"native",symbol:"NEAR",decimals:24})} per account.</p><button onClick={()=>void registerStorage()} disabled={registering} className="mt-3 inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-4 text-xs font-medium disabled:opacity-50">{registering?<LoaderCircle size={13} className="animate-spin"/>:<Check size={13}/>}Register token accounts</button></div>}
         {state!=="processing"&&state!=="refunded"&&<button onClick={()=>void pay()} disabled={connecting||state==="claiming"||state==="awaiting-wallet"} className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{connecting||state==="claiming"||state==="awaiting-wallet"?<LoaderCircle size={16} className="animate-spin"/>:<WalletCards size={16} className="text-signal"/>}{!accountId?"Connect NEAR wallet":state==="claiming"?"Verify checkout in your wallet…":state==="awaiting-wallet"?"Approve in your wallet…":"Pay with NEAR wallet"}<ArrowRight size={14}/></button>}
+        {state!=="processing"&&state!=="refunded"&&!isServiceCheckout&&link&&<CrossChainPanel slug={slug} link={link} onSettled={(orderId,merchantId)=>void crossChainSettled(orderId,merchantId)}/>}
         <p className="mt-4 flex items-center justify-center gap-2 text-center text-[11px] leading-5 text-mist"><ShieldCheck size={13} className="shrink-0 text-green-deep"/>Your keys stay in your wallet. Check order status before retrying a pending payment.</p>
       </div>}
     </section></div></main>;

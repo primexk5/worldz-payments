@@ -7,6 +7,9 @@ mod error;
 mod indexer;
 mod models;
 mod near_rpc;
+mod oneclick;
+#[cfg(test)]
+mod oneclick_db_tests;
 mod orders;
 #[cfg(test)]
 mod security_tests;
@@ -71,6 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     orders::spawn_reconciliation_worker(worker_state.clone());
     shopify::spawn_order_sync_worker(worker_state.clone());
     indexer::spawn_indexer_worker(worker_state.clone());
+    oneclick::spawn_oneclick_worker(worker_state.clone());
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

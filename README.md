@@ -20,6 +20,8 @@ The default configuration targets **NEAR testnet**. Mainnet requires its own con
 
 The dashboard includes **Subscription services** for Nigeria VTpass sandbox airtime, data, electricity, and one-time TV purchases; more countries are coming soon. Buyers can approve a NEAR testnet payment in native NEAR or an enabled USD stable token. The checkout and service receipt appear on the same page. It only calls VTpass after a NEAR testnet order has verified settlement. The VTpass host is pinned to `sandbox.vtpass.com`; this demo does not convert test tokens into NGN or deliver real services.
 
+Payment links can also receive **cross-chain payments**: customers pay with an EVM (Ethereum, Base, Arbitrum) or Solana wallet, and a NEAR Intents swap settles the merchant on NEAR. A `ONECLICK_MODE=mock` setting runs the entire flow locally without external calls, so it can be demonstrated safely; `ONECLICK_MODE=live` talks to the 1Click API and is mainnet-only. Native NEAR checkout is unaffected. See [Cross-chain pay-in](docs/cross-chain.md).
+
 ## How a payment works
 
 1. A merchant signs in with a wallet and creates a payment link.
@@ -84,6 +86,7 @@ Fill in the settings in `backend/.env`:
 | `NEAR_TESTNET_FT_ALLOWLIST` | Token contracts enabled for checkout; align these with the router’s allowlist |
 | `VTPASS_API_KEY`, `VTPASS_PUBLIC_KEY`, `VTPASS_SECRET_KEY` | VTpass **sandbox** credentials; keep them in the backend environment only |
 | `VTPASS_DATA_ENCRYPTION_KEY_BASE64` | Separate random 32-byte key used to encrypt phone/meter/subscriber details at rest; generate with `openssl rand -base64 32` |
+| `ONECLICK_ENABLED`, `ONECLICK_MODE` | Cross-chain pay-in switch and mode; `mock` runs locally with fake money, `live` uses the 1Click API on mainnet (see [docs/cross-chain.md](docs/cross-chain.md)) |
 | `SESSION_COOKIE_SECURE` | Use `false` for local HTTP and `true` for deployed HTTPS |
 
 To initialize a local testnet signing seed, the helper below writes a seed only if one is not already configured and prints its public key:
@@ -127,6 +130,19 @@ Configure the `SHOPIFY_*` settings described in [`backend/.env.example`](backend
 
 Product variants need the `worldz.payment` JSON metafield used by the integration. Checkout validates the selected asset and token metadata, calculates the total for the requested quantity, and requires buyer details before payment authorization. A completed NEAR payment is synchronized to Shopify only after verified settlement.
 
+### 4. Optional cross-chain pay-in demo
+
+Seed the demo merchant and cross-chain-enabled payment links, then enable mock mode:
+
+```sh
+psql "$DATABASE_URL" -f scripts/seed-demo.sql
+# in backend/.env:
+# ONECLICK_ENABLED=true
+# ONECLICK_MODE=mock
+```
+
+Open `/pay/demo-cc`, choose **Pay with another chain**, connect Phantom or an EIP-6963 wallet, and press **Simulate deposit**. The backend worker settles the order through the same verified-receipt pipeline used by native payments. In `mock` mode no external API is called; set `ONECLICK_MODE=live` to route real mainnet swaps through 1Click.
+
 ## Checks and contract builds
 
 Run Rust unit tests from the repository root:
@@ -139,7 +155,7 @@ Run frontend checks:
 
 ```sh
 cd frontend
-npm run test:near
+npm run test
 npx tsc --noEmit
 npm run lint
 npm run build
@@ -194,6 +210,7 @@ Source changes in this repository do not automatically prove that a deployed con
 - [Signed-order protocol](docs/near-signed-order-v1.md)
 - [API data schema](docs/near-api.schema.json)
 - [Payment-link troubleshooting](docs/payment-link-recovery.md)
+- [Cross-chain pay-in (NEAR Intents)](docs/cross-chain.md)
 - [Terms and rules of use](https://worldz-payments.vercel.app/terms)
 - [Privacy and cookies](https://worldz-payments.vercel.app/privacy)
 
