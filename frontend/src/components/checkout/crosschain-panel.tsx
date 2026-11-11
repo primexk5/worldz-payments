@@ -19,12 +19,12 @@ interface EvmOption {
 }
 
 function originAssetOf(token: OneClickToken): NearAssetLike {
-  return { type: "nep141", contractId: token.contractAddress, symbol: token.symbol, decimals: token.decimals };
+  return { type: "nep141", contractId: token.contractAddress ?? token.assetId, symbol: token.symbol, decimals: token.decimals };
 }
 
 type NearAssetLike = { type: "nep141"; contractId: string; symbol: string; decimals: number };
 
-export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link: PaymentLink; onSettled: (orderId: string, merchantId: string) => void }) {
+export function CrossChainPanel({ slug, link, onSettled, onPaymentActiveChange }: { slug: string; link: PaymentLink; onSettled: (orderId: string, merchantId: string) => void; onPaymentActiveChange?: (active: boolean) => void }) {
   const [open, setOpen] = useState(false);
   const [tokens, setTokens] = useState<OneClickToken[]>([]);
   const [mode, setMode] = useState<string | null>(null);
@@ -34,7 +34,7 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
   const [quote, setQuote] = useState<OneClickQuote | null>(null);
   const [attempt, setAttempt] = useState<OneClickAttempt | null>(null);
   const [status, setStatus] = useState<AttemptStatus | null>(null);
-  const [minutesLeft, setMinutesLeft] = useState(0);
+  const [submittedHash, setSubmittedHash] = useState<{ attemptId: string; hash: string } | null>(null);
   const [state, setState] = useState<PanelState>("choose");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +59,7 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
   }, [open, loadTokens]);
 
   useEffect(() => {
-    if (state !== "processing" || !attempt) return;
+    if ((state !== "processing" && state !== "depositing") || !attempt) return;
     const tick = async () => {
       try {
         const current = await nearApi.oneclickAttempt(attempt.attemptId);
@@ -69,6 +69,7 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
           onSettled(attempt.orderId, attempt.merchantId);
         } else if (["REFUNDED", "FAILED", "EXPIRED"].includes(current.status)) {
           setState("closed");
+          onPaymentActiveChange?.(false);
           setError(current.failureReason ?? `The cross-chain payment ended as ${current.status.toLowerCase().replaceAll("_", " ")}.`);
         } else if (current.status === "INCOMPLETE_DEPOSIT") {
           setState("closed");
@@ -81,7 +82,7 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
     void tick();
     const interval = window.setInterval(() => void tick(), 4000);
     return () => window.clearInterval(interval);
-  }, [state, attempt, onSettled]);
+  }, [state, attempt, onSettled, onPaymentActiveChange]);
 
   const connect = async (connectWallet: () => Promise<CrossChainWallet>) => {
     setError(null);
@@ -113,9 +114,11 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
 
   const startPayment = () => run(async () => {
     if (!wallet || !selected) return;
+    if (!quote || Date.now() / 1000 >= quote.expiresAtSeconds) throw new Error("Your quote expired. Go back and request a fresh quote.");
     const created = await nearApi.oneclickCreateAttempt(slug, { originAsset: selected, refundTo: wallet.address });
     setAttempt(created);
-    setMinutesLeft(Math.max(0, Math.round((created.deadlineSeconds - Date.now() / 1000) / 60)));
+    onPaymentActiveChange?.(true);
+    setSubmittedHash(null);
     setState("depositing");
   });
 
@@ -143,9 +146,16 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
 
   const sendDeposit = () => run(async () => {
     if (!wallet || !attempt || !origin) return;
-    const txHash = attempt.simulated
-      ? `0xsim-${attempt.attemptId}`
-      : await wallet.sendTransfer({ depositAddress: attempt.depositAddress, amountRaw: attempt.amountIn, origin, sender: wallet.address });
+    if (!submittedHash && Date.now() / 1000 >= attempt.deadlineSeconds) {
+      throw new Error("This quote expired. Request a new quote before approving payment.");
+    }
+    if (attempt.depositMemo && !attempt.simulated) throw new Error("This payment route requires a memo and is not supported by this wallet yet. No payment was sent.");
+    const txHash = submittedHash?.attemptId === attempt.attemptId
+      ? submittedHash.hash
+      : attempt.simulated
+        ? `0xsim-${attempt.attemptId}`
+        : await wallet.sendTransfer({ depositAddress: attempt.depositAddress, amountRaw: attempt.amountIn, origin, sender: wallet.address });
+    setSubmittedHash({ attemptId: attempt.attemptId, hash: txHash });
     const submitted = await nearApi.oneclickSubmitDeposit(attempt.attemptId, txHash);
     setStatus({ attemptId: attempt.attemptId, status: submitted.status as AttemptStatus["status"], orderState: submitted.orderState, txHash, failureReason: null, simulated: submitted.simulated });
     setState("processing");
@@ -173,7 +183,7 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
       </div>
       <p className="mt-2 text-xs leading-5 text-mist">
         {mode === "mock"
-          ? "Sandbox mode: the swap runs locally with fake money so you can try the full flow. Nothing is broadcast to any chain."
+          ? "Sandbox payment with current market prices. No real funds are sent."
           : `A NEAR Intents swap pays the merchant on NEAR from ${link.networkId}. Refunds go back to your wallet if the swap fails.`}
       </p>
       {error && <p role="alert" className="mt-3 rounded-xl border border-alert/20 bg-alert/5 p-3 text-xs leading-5 text-alert">{error}</p>}
@@ -218,28 +228,25 @@ export function CrossChainPanel({ slug, link, onSettled }: { slug: string; link:
       )}
       {state === "quoted" && quote && wallet && (
         <div className="mt-4 rounded-xl bg-paper p-4">
+          <p className="mb-3 text-[11px] text-ink/60">{quote.simulated ? "Estimate from current market prices · simulated payment" : "Live swap quote · network gas is paid separately"}</p>
           <div className="flex justify-between gap-3 text-xs"><span className="text-mist">You send</span><span className="font-mono">≈ {formatAssetAmount(quote.amountIn, originAssetOf(origin!))}</span></div>
           <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Minimum accepted</span><span className="font-mono">{formatAssetAmount(quote.minAmountIn, originAssetOf(origin!))}</span></div>
           <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Merchant receives</span><span className="font-mono">{formatAssetAmount(quote.amountOut, link.asset)} on NEAR</span></div>
           <div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-mist">Estimated time</span><span className="font-mono">~{quote.timeEstimateSeconds}s</span></div>
-          <button onClick={() => void startPayment()} disabled={busy} className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin" /> : <ArrowRight size={14} />}Start cross-chain payment</button>
+          <button onClick={() => void startPayment()} disabled={busy} className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin" /> : <ArrowRight size={14} />}Review wallet payment</button>
           <button onClick={() => { setState("choose"); setQuote(null); }} className="mt-2 w-full text-center text-[11px] text-mist underline">Back</button>
         </div>
       )}
       {attempt && (state === "depositing" || state === "processing" || state === "closed" || state === "settled") && (
         <div className="mt-4 rounded-xl bg-paper p-4">
-          <p className="font-mono text-[10px] uppercase tracking-[.12em] text-mist">Deposit address</p>
-          <p className="mt-1 break-all font-mono text-xs">{attempt.depositAddress}</p>
-          <p className="mt-2 text-xs leading-5 text-ink/70">Send exactly {formatAssetAmount(attempt.amountIn, originAssetOf(origin!))} to this address within {minutesLeft} minutes. If the swap fails, funds are refunded to your wallet.</p>
-          {state === "depositing" && (
-            attempt.simulated
-              ? <button onClick={() => void sendDeposit()} disabled={busy} className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin" /> : <Check size={14} />}Simulate deposit</button>
-              : <button onClick={() => void sendDeposit()} disabled={busy} className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-5 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin" /> : <WalletCards size={15} />}Send {origin?.symbol} from {wallet?.name}</button>
-          )}
+          <p className="text-xs font-medium">{state === "depositing" ? "Review and approve in your wallet" : "Payment progress"}</p>
+          <p className="mt-2 break-words font-mono text-sm">{formatAssetAmount(attempt.amountIn, originAssetOf(origin!))}</p>
+          <p className="mt-2 text-xs leading-5 text-ink/60">{attempt.simulated ? "Sandbox payment using current market prices. No real funds will be sent." : `Approve the payment in ${wallet?.name ?? "your wallet"}. Your wallet handles the transfer automatically.`}</p>
+          {state === "depositing" && <button onClick={() => void sendDeposit()} disabled={busy} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-ink px-4 py-3 text-xs font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{busy ? <LoaderCircle size={15} className="animate-spin"/> : <WalletCards size={15}/>} {submittedHash ? "Check submitted payment" : attempt.simulated ? "Confirm simulated payment" : `Approve in ${wallet?.name ?? "wallet"}`}</button>}
           {state === "processing" && (
             <div className="mt-3 rounded-xl border border-amber/40 bg-amber/10 p-3">
               <div className="flex items-center gap-2 text-amber-800"><LoaderCircle size={15} className="animate-spin" /><p className="text-xs font-medium">{status?.status.replaceAll("_", " ") ?? "PENDING DEPOSIT"}</p></div>
-              <p className="mt-2 text-xs leading-5 text-ink/60">We are waiting for the swap to settle on NEAR. You can leave this page; the deposit address is tied to this order.</p>
+              <p className="mt-2 text-xs leading-5 text-ink/60">Your payment was submitted. Keep this checkout open while we confirm the merchant payout on NEAR.</p>
             </div>
           )}
           {state === "settled" && <div className="mt-3 flex items-center gap-2 rounded-xl border border-green-deep/20 bg-green-deep/5 p-3 text-xs font-medium text-green-deep"><Check size={15} />Cross-chain payment settled on NEAR.</div>}

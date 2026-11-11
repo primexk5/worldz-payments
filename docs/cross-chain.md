@@ -17,9 +17,11 @@ webhook pipeline as native payments.
    address and records a `one_click_attempts` row alongside an `OPEN` order
    with `source='1click'` and `pay_method='cross_chain'`
    (`POST /v1/links/{slug}/oneclick/attempts`).
-4. The customer sends the quoted amount to the deposit address; the browser
-   either broadcasts an ERC-20 `transfer` (hand-rolled calldata, no extra
-   wallet SDK) or a Solana SPL `transferChecked`, then reports the hash
+4. The customer reviews the final amount and approves the transfer in the
+   connected wallet. Deposit addresses stay internal; there are no copy-address
+   instructions. The browser switches to the selected EVM chain and requests a
+   native ETH transfer or an ERC-20 `transfer` to the token contract, or requests
+   a native SOL / SPL `transferChecked` transaction in Phantom, then reports the hash
    (`POST /v1/oneclick/attempts/{id}/deposit`).
 5. A backend status worker polls the swap, verifies the on-NEAR payout by
    reading the NEAR transaction receipt (an `ft_transfer` event to the
@@ -33,12 +35,17 @@ webhook pipeline as native payments.
 | | `ONECLICK_MODE=mock` | `ONECLICK_MODE=live` |
 | --- | --- | --- |
 | Network | Works on any configured network, incl. testnet | Mainnet only (`ONECLICK_ENABLED=true` required) |
-| Quotes/deposits | Local fixture; no external calls | 1Click API (`/v0/quote`, `/v0/status`) |
-| Deposit | "Simulate deposit" button posts a synthetic hash | Real wallet transfer to the 1Click deposit address |
+| Quotes/deposits | Current USD prices from 1Click `/v0/tokens`; simulated deposits | Executable 1Click quotes (`/v0/quote`, `/v0/status`) |
+| Payment approval | "Confirm simulated payment" posts a synthetic hash; no wallet transaction | Connected wallet approves and sends the transfer automatically |
 | Settlement | Verified path with a synthetic NEAR hash | On-NEAR receipt verification via NEAR RPC |
 
 The mock mode exists so the full UI, attempt lifecycle, deadline expiry,
-and settle-once guarantees can be exercised locally without keys. It never
+and settle-once guarantees can be exercised locally without keys. Simulated
+quotes convert the configured token amount using fresh origin and destination
+USD prices, with integer arithmetic and upward rounding. Prices are cached for
+60 seconds and rejected when over 10 minutes old; missing prices block quoting
+instead of falling back to a 1:1 rate. Simulation needs public 1Click price data;
+unit and DB lifecycle tests inject deterministic prices without external calls. It never
 touches the native NEAR checkout. In live mode the backend keeps any
 `ONECLICK_API_KEY` server-side; the browser only ever talks to this API.
 
@@ -47,9 +54,9 @@ touches the native NEAR checkout. In live mode the backend keeps any
 | Setting | Purpose |
 | --- | --- |
 | `ONECLICK_ENABLED` | Master switch; `false` hides every cross-chain endpoint |
-| `ONECLICK_MODE` | `mock` (default) or `live` |
+| `ONECLICK_MODE` | `mock` or `live` (default) |
 | `ONECLICK_BASE_URL` | 1Click API base URL; must be HTTPS |
-| `ONECLICK_API_KEY` | Optional API key sent as `X-API-Key` (server-side only) |
+| `ONECLICK_API_KEY` | Optional 1Click JWT sent as `Authorization: Bearer` (server-side only) |
 | `ONECLICK_MOCK_OUTCOME` | Mock progression: `success`, `refunded`, `failed`, `incomplete_deposit` |
 
 ## Try it locally
@@ -57,7 +64,7 @@ touches the native NEAR checkout. In live mode the backend keeps any
 1. Enable mock mode in `backend/.env` (`ONECLICK_ENABLED=true`,
    `ONECLICK_MODE=mock`) and run the seed below.
 2. Open a seeded link, choose **Pay with another chain**, connect Phantom or
-   an EIP-6963 wallet, and press **Simulate deposit**.
+   an EIP-6963 wallet, review the quote, and press **Confirm simulated payment**.
 3. The worker settles the order after the mock delay (~15s) and the checkout
    shows the same verified receipt as a native payment.
 

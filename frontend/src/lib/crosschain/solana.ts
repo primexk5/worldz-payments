@@ -36,54 +36,65 @@ export async function connectSolanaWallet(): Promise<CrossChainWallet> {
   };
 }
 
-async function sendSolanaTransfer(found: SolanaProvider, request: DepositRequest): Promise<string> {
+export async function buildSolanaPayment(request: DepositRequest, destinationIsTokenAccount = false) {
   if (request.origin.blockchain !== "sol") throw new Error("This wallet cannot send tokens on Solana.");
-  const { Connection, PublicKey, Transaction, TransactionInstruction } = await loadWeb3();
-  const connection = new Connection("https://api.mainnet-beta.solana.com");
+  const { PublicKey, Transaction, TransactionInstruction, SystemProgram } = await loadWeb3();
   const owner = new PublicKey(request.sender);
-  const mint = new PublicKey(request.origin.contractAddress);
-  const tokenProgram = new PublicKey(TOKEN_PROGRAM);
-  const ataProgram = new PublicKey(ATA_PROGRAM);
-  const source = PublicKey.findProgramAddressSync([owner.toBytes(), tokenProgram.toBytes(), mint.toBytes()], ataProgram)[0];
-  const amount = BigInt(request.amountRaw);
-  const amountBytes = Buffer.alloc(8);
-  for (let index = 0; index < 8; index += 1) amountBytes[index] = Number((amount >> BigInt(index * 8)) & 0xffn);
   const destination = new PublicKey(request.depositAddress);
-  const destinationInfo = await connection.getAccountInfo(destination);
-  const isTokenAccount = destinationInfo?.owner.equals(tokenProgram) ?? false;
-  const transfer = new TransactionInstruction({
-    programId: tokenProgram,
-    keys: isTokenAccount
-      ? [{ pubkey: source, isSigner: false, isWritable: true }, { pubkey: destination, isSigner: false, isWritable: true }, { pubkey: owner, isSigner: true, isWritable: false }]
-      : (() => {
-          const derived = PublicKey.findProgramAddressSync([destination.toBytes(), tokenProgram.toBytes(), mint.toBytes()], ataProgram)[0];
-          return [
-            { pubkey: source, isSigner: false, isWritable: true },
-            { pubkey: derived, isSigner: false, isWritable: true },
-            { pubkey: owner, isSigner: true, isWritable: false },
-          ];
-        })(),
-    data: Buffer.from([12, ...amountBytes, request.origin.decimals]),
-  });
+  if (!/^[0-9]+$/.test(request.amountRaw)) throw new Error("The payment amount is invalid.");
+  const amount = BigInt(request.amountRaw);
+  if (amount <= 0n || amount >= 2n ** 64n) throw new Error("The payment amount is invalid.");
   const transaction = new Transaction();
-  transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
   transaction.feePayer = owner;
-  if (!isTokenAccount) {
+  if (!request.origin.contractAddress) {
+    if (request.origin.symbol.toUpperCase() !== "SOL" || request.origin.decimals !== 9) throw new Error("Unsupported native token.");
+    transaction.add(SystemProgram.transfer({ fromPubkey: owner, toPubkey: destination, lamports: amount }));
+  } else {
+    const mint = new PublicKey(request.origin.contractAddress);
+    const tokenProgram = new PublicKey(TOKEN_PROGRAM);
+    const ataProgram = new PublicKey(ATA_PROGRAM);
+    const source = PublicKey.findProgramAddressSync([owner.toBytes(), tokenProgram.toBytes(), mint.toBytes()], ataProgram)[0];
+    const isTokenAccount = destinationIsTokenAccount;
+    const target = isTokenAccount ? destination : PublicKey.findProgramAddressSync([destination.toBytes(), tokenProgram.toBytes(), mint.toBytes()], ataProgram)[0];
+    if (!isTokenAccount) {
+      transaction.add(new TransactionInstruction({
+        programId: ataProgram,
+        keys: [
+          { pubkey: owner, isSigner: true, isWritable: true },
+          { pubkey: target, isSigner: false, isWritable: true },
+          { pubkey: destination, isSigner: false, isWritable: false },
+          { pubkey: mint, isSigner: false, isWritable: false },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+          { pubkey: tokenProgram, isSigner: false, isWritable: false },
+        ],
+        data: Buffer.from([1]),
+      }));
+    }
+    const amountBytes = Buffer.alloc(8);
+    for (let index = 0; index < 8; index += 1) amountBytes[index] = Number((amount >> BigInt(index * 8)) & 0xffn);
     transaction.add(new TransactionInstruction({
-      programId: ataProgram,
+      programId: tokenProgram,
       keys: [
-        { pubkey: owner, isSigner: true, isWritable: true },
-        { pubkey: destination, isSigner: false, isWritable: true },
-        { pubkey: destination, isSigner: false, isWritable: false },
+        { pubkey: source, isSigner: false, isWritable: true },
         { pubkey: mint, isSigner: false, isWritable: false },
-        { pubkey: new PublicKey("11111111111111111111111111111111"), isSigner: false, isWritable: false },
-        { pubkey: tokenProgram, isSigner: false, isWritable: false },
-        { pubkey: new PublicKey("SysvarRent111111111111111111111111111111111"), isSigner: false, isWritable: false },
+        { pubkey: target, isSigner: false, isWritable: true },
+        { pubkey: owner, isSigner: true, isWritable: false },
       ],
-      data: Buffer.from([1]),
+      data: Buffer.from([12, ...amountBytes, request.origin.decimals]),
     }));
   }
-  transaction.add(transfer);
+  return transaction;
+}
+
+async function sendSolanaTransfer(found: SolanaProvider, request: DepositRequest): Promise<string> {
+  if (found.publicKey?.toString() !== request.sender) throw new Error("Your wallet account changed. Reconnect before paying.");
+  const { Connection, PublicKey } = await loadWeb3();
+  const connection = new Connection("https://api.mainnet-beta.solana.com");
+  const destinationInfo = request.origin.contractAddress
+    ? await connection.getAccountInfo(new PublicKey(request.depositAddress)) : null;
+  const isTokenAccount = destinationInfo?.owner.toBase58() === TOKEN_PROGRAM;
+  const transaction = await buildSolanaPayment(request, isTokenAccount);
+  transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
   const result = await found.signAndSendTransaction(transaction);
   const signature = typeof result === "string" ? result : result?.signature;
   if (!signature) throw new Error("The wallet did not return a transaction signature.");

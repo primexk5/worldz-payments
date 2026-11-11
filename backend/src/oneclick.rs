@@ -17,7 +17,8 @@ use crate::models::AssetDto;
 use crate::near_rpc;
 use crate::state::{AppState, CachedOneClickTokens};
 
-const TOKENS_CACHE_TTL_SECONDS: u64 = 600;
+const TOKENS_CACHE_TTL_SECONDS: u64 = 60;
+const MAX_PRICE_AGE_SECONDS: i64 = 600;
 const QUOTE_HTTP_TIMEOUT_SECONDS: u64 = 8;
 pub(crate) const MAX_SLIPPAGE_BPS: u32 = 1000;
 pub(crate) const DEFAULT_SLIPPAGE_BPS: u32 = 100;
@@ -29,12 +30,12 @@ pub(crate) const MOCK_TOKENS_FIXTURE: &str = r#"[
   {"assetId":"nep141:usdt.fakes.testnet","decimals":6,"blockchain":"near","symbol":"USDT","contractAddress":"usdt.fakes.testnet"},
   {"assetId":"nep141:dai.fakes.testnet","decimals":6,"blockchain":"near","symbol":"DAI","contractAddress":"dai.fakes.testnet"},
   {"assetId":"nep141:brz-0xe0caa5f511cf2e3500a9d6df8efc384c56567840.omft.near","decimals":6,"blockchain":"near","symbol":"BRZ","contractAddress":null},
-  {"assetId":"nep141:eth-0x2170ed0880ac9a755fd29b2688956bd959f933f8.omft.near","decimals":18,"blockchain":"eth","symbol":"ETH","contractAddress":"0x2170ed0880ac9a755fd29b2688956bd959f933f8"},
-  {"assetId":"nep141:base-0x0000000000000000000000000000000000000000.omft.near","decimals":18,"blockchain":"base","symbol":"ETH","contractAddress":"0x0000000000000000000000000000000000000000"},
+  {"assetId":"nep141:eth.omft.near","decimals":18,"blockchain":"eth","symbol":"ETH","contractAddress":null},
+  {"assetId":"nep141:base.omft.near","decimals":18,"blockchain":"base","symbol":"ETH","contractAddress":null},
   {"assetId":"nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near","decimals":6,"blockchain":"arb","symbol":"USDC","contractAddress":"0xaf88d065e77c8cc2239327c5edb3a432268e5831"},
   {"assetId":"nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near","decimals":6,"blockchain":"base","symbol":"USDC","contractAddress":"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"},
-  {"assetId":"nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near","decimals":9,"blockchain":"sol","symbol":"SOL","contractAddress":"5ce3bf3a31af18be40ba30f721101b4341690186"},
-  {"assetId":"nep141:sol-EPjFWdd5AufqSSqeM2qN1xzybdba6RbFsu9EAg9MniPm.omft.near","decimals":6,"blockchain":"sol","symbol":"USDC","contractAddress":"EPjFWdd5AufqSSqeM2qN1xzybdba6RbFsu9EAg9MniPm"},
+  {"assetId":"nep141:sol.omft.near","decimals":9,"blockchain":"sol","symbol":"SOL","contractAddress":null},
+  {"assetId":"nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near","decimals":6,"blockchain":"sol","symbol":"USDC","contractAddress":"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"},
   {"assetId":"btc:bitcoin","decimals":8,"blockchain":"btc","symbol":"BTC","contractAddress":null}
 ]"#;
 
@@ -45,6 +46,8 @@ pub(crate) struct OneClickToken {
     pub blockchain: String,
     pub symbol: String,
     pub contract_address: Option<String>,
+    pub price_units: Option<u128>,
+    pub price_updated_at: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -299,6 +302,12 @@ fn parse_tokens(payload: &Value) -> Result<Vec<OneClickToken>, ApiError> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
+            price_units: item.get("price").and_then(parse_price_units),
+            price_updated_at: item
+                .get("priceUpdatedAt")
+                .and_then(Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|time| time.timestamp()),
             contract_address: item
                 .get("contractAddress")
                 .and_then(Value::as_str)
@@ -322,6 +331,10 @@ pub(crate) async fn tokens(state: &AppState) -> Result<Arc<Vec<OneClickToken>>, 
     if state.config.oneclick_mode == "mock" {
         return Ok(Arc::new(mock_tokens()));
     }
+    market_tokens(state).await
+}
+
+async fn market_tokens(state: &AppState) -> Result<Arc<Vec<OneClickToken>>, ApiError> {
     let mut cached = state.oneclick_tokens.lock().await;
     if let Some(cached) = cached
         .as_ref()
@@ -335,7 +348,7 @@ pub(crate) async fn tokens(state: &AppState) -> Result<Arc<Vec<OneClickToken>>, 
         .get(url)
         .timeout(std::time::Duration::from_secs(QUOTE_HTTP_TIMEOUT_SECONDS));
     if let Some(api_key) = state.config.oneclick_api_key.as_deref() {
-        request = request.header("X-API-Key", api_key);
+        request = request.bearer_auth(api_key);
     }
     let response = request.send().await.map_err(|error| {
         tracing::warn!(%error, "1Click token list fetch failed");
@@ -371,7 +384,7 @@ async fn post_quote(state: &AppState, body: Value) -> Result<Value, ApiError> {
         .json(&body)
         .timeout(std::time::Duration::from_secs(QUOTE_HTTP_TIMEOUT_SECONDS));
     if let Some(api_key) = auth_header(state) {
-        request = request.header("X-API-Key", api_key);
+        request = request.bearer_auth(api_key);
     }
     let response = request.send().await.map_err(|error| {
         tracing::warn!(%error, "1Click quote request failed");
@@ -419,7 +432,7 @@ pub(crate) async fn live_status(
         .query(&[("depositAddress", deposit_address)])
         .timeout(std::time::Duration::from_secs(QUOTE_HTTP_TIMEOUT_SECONDS));
     if let Some(api_key) = auth_header(state) {
-        request = request.header("X-API-Key", api_key);
+        request = request.bearer_auth(api_key);
     }
     let response = request.send().await.map_err(|error| {
         tracing::warn!(%error, "1Click status request failed");
@@ -450,7 +463,7 @@ pub(crate) async fn submit_deposit_tx(
         .json(&json!({"depositAddress": deposit_address, "txHash": tx_hash}))
         .timeout(std::time::Duration::from_secs(QUOTE_HTTP_TIMEOUT_SECONDS));
     if let Some(api_key) = auth_header(state) {
-        request = request.header("X-API-Key", api_key);
+        request = request.bearer_auth(api_key);
     }
     let response = request.send().await.map_err(|error| {
         tracing::warn!(%error, "1Click deposit submit failed");
@@ -530,31 +543,128 @@ fn origin_token<'a>(
         ))
 }
 
-fn mock_amount_in(
-    origin_decimals: u8,
-    destination_decimals: u8,
+// USD prices use eight decimal places; quote arithmetic stays in integer token units.
+fn parse_price_units(value: &Value) -> Option<u128> {
+    let text = value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| value.to_string());
+    let (whole, fraction) = text.split_once('.').unwrap_or((&text, ""));
+    if whole.is_empty()
+        || !whole
+            .bytes()
+            .chain(fraction.bytes())
+            .all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let fractional = format!("{fraction:0<8}");
+    let units = whole
+        .parse::<u128>()
+        .ok()?
+        .checked_mul(100_000_000)?
+        .checked_add(fractional[..8].parse::<u128>().ok()?)?;
+    (units > 0).then_some(units)
+}
+
+fn fresh_price(token: &OneClickToken, now: i64) -> Option<u128> {
+    let age = now.checked_sub(token.price_updated_at?)?;
+    (0..=MAX_PRICE_AGE_SECONDS)
+        .contains(&age)
+        .then_some(token.price_units?)
+        .filter(|p| *p > 0)
+}
+
+async fn mock_amount_in(
+    state: &AppState,
+    origin: &OneClickToken,
+    destination: &OneClickToken,
     amount_out: &str,
     slippage_bps: u32,
 ) -> Result<String, ApiError> {
-    let amount: u128 = amount_out.parse().map_err(|_| ApiError::internal())?;
-    let mut amount_in = if origin_decimals >= destination_decimals {
-        amount
-            .checked_mul(10u128.pow(u32::from(origin_decimals - destination_decimals)))
-            .ok_or_else(|| ApiError::bad_request("The payment amount is too large."))?
-    } else {
-        amount / 10u128.pow(u32::from(destination_decimals - origin_decimals))
+    let prices = market_tokens(state).await?;
+    let now = Utc::now().timestamp();
+    // Symbol aliases apply only to the sandbox's known fixture assets.
+    let price = |token: &OneClickToken| {
+        prices
+            .iter()
+            .filter(|candidate| {
+                candidate.asset_id == token.asset_id
+                    || (candidate.blockchain == token.blockchain
+                        && candidate.symbol.eq_ignore_ascii_case(&token.symbol))
+            })
+            .find_map(|candidate| fresh_price(candidate, now))
+            .ok_or_else(|| {
+                ApiError::unavailable(format!(
+                    "A fresh market price for {} is unavailable. Try again shortly.",
+                    token.symbol
+                ))
+            })
     };
-    amount_in = amount_in.saturating_add(
-        amount_in
-            .saturating_mul(u128::from(slippage_bps))
-            .saturating_div(10_000),
-    );
-    if amount_in == 0 {
+    market_amount_in(
+        origin.decimals,
+        destination.decimals,
+        amount_out,
+        price(origin)?,
+        price(destination)?,
+        slippage_bps,
+    )
+}
+
+fn market_amount_in(
+    origin_decimals: u8,
+    destination_decimals: u8,
+    amount_out: &str,
+    origin_price: u128,
+    destination_price: u128,
+    slippage_bps: u32,
+) -> Result<String, ApiError> {
+    let invalid =
+        || ApiError::bad_request("The payment amount or market price is invalid or too large.");
+    if slippage_bps > MAX_SLIPPAGE_BPS || origin_price == 0 || destination_price == 0 {
+        return Err(invalid());
+    }
+    let mut numerator = [
+        amount_out.parse::<u128>().map_err(|_| invalid())?,
+        destination_price,
+        10u128
+            .checked_pow(u32::from(origin_decimals))
+            .ok_or_else(invalid)?,
+        10_000 + u128::from(slippage_bps),
+    ];
+    let mut denominator = [
+        origin_price,
+        10u128
+            .checked_pow(u32::from(destination_decimals))
+            .ok_or_else(invalid)?,
+        10_000,
+    ];
+    // Cancel common factors before multiplication to preserve u128 headroom.
+    for top in &mut numerator {
+        for bottom in &mut denominator {
+            let (mut a, mut b) = (*top, *bottom);
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            *top /= a;
+            *bottom /= a;
+        }
+    }
+    let top = numerator
+        .into_iter()
+        .try_fold(1u128, |a, b| a.checked_mul(b))
+        .ok_or_else(invalid)?;
+    let bottom = denominator
+        .into_iter()
+        .try_fold(1u128, |a, b| a.checked_mul(b))
+        .ok_or_else(invalid)?;
+    let amount = top.div_ceil(bottom);
+    if amount == 0 {
         return Err(ApiError::bad_request(
             "The payment amount is too small to swap.",
         ));
     }
-    Ok(amount_in.to_string())
+    Ok(amount.to_string())
 }
 
 fn mock_deposit_address() -> String {
@@ -682,11 +792,13 @@ pub async fn quote(
     };
     let quote = if simulated(&state) {
         let amount_in = mock_amount_in(
-            origin.decimals,
-            token_decimals(&tokens, &link.asset)?,
+            &state,
+            origin,
+            origin_token(&tokens, &params.destination_asset)?,
             &link.amount,
             params.slippage_bps,
-        )?;
+        )
+        .await?;
         let min_amount_in = amount_in.clone();
         OneClickQuote {
             deposit_address: None,
@@ -715,29 +827,6 @@ pub async fn quote(
         "expiresAtSeconds": Utc::now().timestamp() + WET_QUOTE_REQUEST_DEADLINE_SECONDS,
         "simulated": simulated(&state),
     })))
-}
-
-fn token_decimals(tokens: &[OneClickToken], asset: &AssetDto) -> Result<u8, ApiError> {
-    let AssetDto::Nep141 { contract_id, .. } = asset else {
-        return Err(ApiError::bad_request(
-            "Native NEAR receive links cannot accept cross-chain payments. Use a NEP-141 receive token.",
-        ));
-    };
-    Ok(tokens
-        .iter()
-        .find(|token| {
-            token.asset_id.starts_with("nep141:")
-                && token.contract_address.as_deref() == Some(contract_id.as_str())
-        })
-        .map(|token| token.decimals)
-        .unwrap_or(asset_token_decimals(asset)))
-}
-
-fn asset_token_decimals(asset: &AssetDto) -> u8 {
-    match asset {
-        AssetDto::Native { decimals, .. } => *decimals,
-        AssetDto::Nep141 { decimals, .. } => *decimals,
-    }
 }
 
 #[derive(Deserialize)]
@@ -783,11 +872,13 @@ pub async fn create_attempt(
     };
     let wet = if simulated(&state) {
         let amount_in = mock_amount_in(
-            origin.decimals,
-            token_decimals(&tokens, &link.asset)?,
+            &state,
+            origin,
+            origin_token(&tokens, &destination_asset)?,
             &link.amount,
             slippage_bps,
-        )?;
+        )
+        .await?;
         let deadline = Utc::now() + chrono::Duration::seconds(QUOTE_TTL_SECONDS);
         OneClickQuote {
             deposit_address: Some(mock_deposit_address()),
@@ -1117,18 +1208,20 @@ async fn set_attempt_status(
     attempt_id: &str,
     status: &str,
 ) -> Result<(), ApiError> {
-    sqlx::query("UPDATE one_click_attempts SET status=?, updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=? AND status IN ('AWAITING_DEPOSIT','PENDING_DEPOSIT','PROCESSING','INCOMPLETE_DEPOSIT')")
+    sqlx::query("UPDATE one_click_attempts SET status=?, updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=? AND status<>? AND status IN ('AWAITING_DEPOSIT','PENDING_DEPOSIT','PROCESSING','INCOMPLETE_DEPOSIT')")
         .bind(status)
         .bind(attempt_id)
+        .bind(status)
         .execute(&state.pool)
         .await?;
     Ok(())
 }
 
 async fn close_attempt(state: &AppState, attempt_id: &str, status: &str) -> Result<(), ApiError> {
-    sqlx::query("UPDATE one_click_attempts SET status=?, updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=? AND status IN ('AWAITING_DEPOSIT','PENDING_DEPOSIT','PROCESSING','INCOMPLETE_DEPOSIT')")
+    sqlx::query("UPDATE one_click_attempts SET status=?, updated_at=UTC_TIMESTAMP(6) WHERE attempt_id=? AND status<>? AND status IN ('AWAITING_DEPOSIT','PENDING_DEPOSIT','PROCESSING','INCOMPLETE_DEPOSIT')")
         .bind(status)
         .bind(attempt_id)
+        .bind(status)
         .execute(&state.pool)
         .await?;
     Ok(())
@@ -1341,6 +1434,10 @@ async fn settle_success(
 
 #[cfg(test)]
 pub(crate) mod test_hooks {
+    pub(crate) fn priced_tokens_for_test(payload: &serde_json::Value) -> Vec<super::OneClickToken> {
+        super::parse_tokens(payload).unwrap()
+    }
+
     use super::*;
 
     pub(crate) async fn settle_success_for_test(
@@ -1633,15 +1730,48 @@ mod tests {
     }
 
     #[test]
-    fn mock_amount_in_scales_decimals_and_applies_slippage_buffer() {
-        assert_eq!(mock_amount_in(6, 6, "1000000", 100).unwrap(), "1010000");
-        assert_eq!(mock_amount_in(9, 6, "1000000", 0).unwrap(), "1000000000");
-        assert_eq!(mock_amount_in(6, 9, "1000000000", 0).unwrap(), "1000000");
+    fn market_quotes_convert_usdc_to_eth_and_round_up() {
+        // Deterministic test prices: USDC $1, ETH $2,000. These are not runtime fallbacks.
         assert_eq!(
-            mock_amount_in(24, 24, "1000000000000000000000000", 300).unwrap(),
-            "1030000000000000000000000"
+            market_amount_in(18, 6, "2000000", 200_000_000_000, 100_000_000, 100).unwrap(),
+            "1010000000000000"
         );
-        assert!(mock_amount_in(24, 24, "0", 0).is_err());
+        assert_eq!(
+            market_amount_in(6, 18, "1000000000000000", 100_000_000, 200_000_000_000, 0).unwrap(),
+            "2000000"
+        );
+        assert_eq!(
+            market_amount_in(6, 6, "2000000", 100_000_000, 100_000_000, 100).unwrap(),
+            "2020000"
+        );
+        assert_eq!(
+            market_amount_in(6, 6, "1", 300_000_000, 100_000_000, 0).unwrap(),
+            "1"
+        );
+        assert!(market_amount_in(18, 6, "0", 1, 1, 0).is_err());
+        assert!(market_amount_in(18, 6, "1", 0, 1, 0).is_err());
+        assert!(market_amount_in(255, 6, "1", 1, 1, 0).is_err());
+        assert!(market_amount_in(18, 6, "1", 1, 1, 1001).is_err());
+    }
+
+    #[test]
+    fn market_prices_require_positive_values_and_recent_timestamps() {
+        assert_eq!(
+            parse_price_units(&json!("2000.12345678")),
+            Some(200012345678)
+        );
+        assert_eq!(parse_price_units(&json!(1.0)), Some(100000000));
+        for bad in [json!("0"), json!("-1"), json!("NaN"), Value::Null] {
+            assert!(parse_price_units(&bad).is_none());
+        }
+        let mut token = mock_tokens().remove(0);
+        token.price_units = Some(100000000);
+        token.price_updated_at = Some(1000);
+        assert_eq!(fresh_price(&token, 1000), Some(100000000));
+        assert!(fresh_price(&token, 1601).is_none());
+        assert!(fresh_price(&token, 999).is_none());
+        token.price_updated_at = None;
+        assert!(fresh_price(&token, 1000).is_none());
     }
 
     #[test]

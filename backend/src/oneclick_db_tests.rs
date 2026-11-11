@@ -88,7 +88,7 @@ async fn seed(pool: &sqlx::PgPool, single_pay: bool) {
         .unwrap();
     sqlx::raw_sql(
         "INSERT INTO merchants (merchant_id,account_id,payout_account_id,display_name) VALUES ('one','one.testnet','one.testnet','One');
-         INSERT INTO payment_links (slug,merchant_id,network_id,asset,amount,amount_display,display_name,multi_pay,max_redemptions) VALUES ('ccfixture','one','testnet','{\"type\":\"nep141\",\"contractId\":\"one.ftoken.testnet\",\"symbol\":\"TKN\",\"decimals\":6}','1000000','1','Cross chain fixture',FALSE,NULL);",
+         INSERT INTO payment_links (slug,merchant_id,network_id,asset,amount,amount_display,display_name,multi_pay,max_redemptions) VALUES ('ccfixture','one','testnet','{\"type\":\"nep141\",\"contractId\":\"usdc.fakes.testnet\",\"symbol\":\"USDC\",\"decimals\":6}','1000000','1','Cross chain fixture',FALSE,NULL);",
     )
     .execute(pool)
     .await
@@ -111,7 +111,7 @@ async fn insert_cross_chain_order(
 ) {
     sqlx::query(
         "INSERT INTO orders (order_id,merchant_id,payer_account_id,network_id,contract_id,order_key,\"authorization\",asset,amount,fee,net,source,link_slug,pay_method) \
-         VALUES ($1,'one','0x2527d02599ba641c19fea793cd0f167589a0f10d','testnet','router.testnet',$2,NULL,'{\"type\":\"nep141\",\"contractId\":\"one.ftoken.testnet\",\"symbol\":\"TKN\",\"decimals\":6}','1000000','0','1000000','1click','ccfixture','cross_chain')",
+         VALUES ($1,'one','0x2527d02599ba641c19fea793cd0f167589a0f10d','testnet','router.testnet',$2,NULL,'{\"type\":\"nep141\",\"contractId\":\"usdc.fakes.testnet\",\"symbol\":\"USDC\",\"decimals\":6}','1000000','0','1000000','1click','ccfixture','cross_chain')",
     )
     .bind(order_id)
     .bind(hex::encode(Sha256::digest(order_id.as_bytes())))
@@ -120,7 +120,7 @@ async fn insert_cross_chain_order(
     .unwrap();
     sqlx::query(
         "INSERT INTO one_click_attempts (attempt_id,network_id,contract_id,order_id,merchant_id,link_slug,origin_asset,destination_asset,amount_out,amount_in,slippage_bps,refund_to,refund_chain,deposit_address,deadline,status,tx_hash) \
-         VALUES ($1,'testnet','router.testnet',$2,'one','ccfixture','nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near','nep141:one.ftoken.testnet.omft.near','1000000','1050000',100,'0x2527d02599ba641c19fea793cd0f167589a0f10d','arb',$3,NOW()+INTERVAL '30 minutes',$4,$5)",
+         VALUES ($1,'testnet','router.testnet',$2,'one','ccfixture','nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near','nep141:usdc.fakes.testnet.omft.near','1000000','1050000',100,'0x2527d02599ba641c19fea793cd0f167589a0f10d','arb',$3,NOW()+INTERVAL '30 minutes',$4,$5)",
     )
     .bind(format!("oc_{order_id}"))
     .bind(order_id)
@@ -135,7 +135,7 @@ async fn insert_cross_chain_order(
 async fn insert_native_order(pool: &sqlx::PgPool, order_id: &str) {
     sqlx::query(
         "INSERT INTO orders (order_id,merchant_id,payer_account_id,network_id,contract_id,order_key,\"authorization\",asset,amount,fee,net,source,link_slug,edit_token_hash) \
-         VALUES ($1,'one','payer.testnet','testnet','router.testnet',$2,$3,'{\"type\":\"nep141\",\"contractId\":\"one.ftoken.testnet\",\"symbol\":\"TKN\",\"decimals\":6}','1000000','0','1000000','link','ccfixture',$4)",
+         VALUES ($1,'one','payer.testnet','testnet','router.testnet',$2,$3,'{\"type\":\"nep141\",\"contractId\":\"usdc.fakes.testnet\",\"symbol\":\"USDC\",\"decimals\":6}','1000000','0','1000000','link','ccfixture',$4)",
     )
     .bind(order_id)
     .bind(hex::encode(Sha256::digest(order_id.as_bytes())))
@@ -375,6 +375,17 @@ async fn mock_lifecycle_runs_the_real_settlement_path_and_never_reuses_deposit_a
     let pool = pool_for(&url, &schema).await;
     seed(&pool, false).await;
     let state = AppState::new(pool.clone(), config(url, None));
+    // Seed current prices so this integration test never calls external services.
+    let payload: Value = serde_json::from_str(crate::oneclick::MOCK_TOKENS_FIXTURE).unwrap();
+    let mut prices = crate::oneclick::test_hooks::priced_tokens_for_test(&payload);
+    for token in &mut prices {
+        token.price_units = Some(100_000_000);
+        token.price_updated_at = Some(chrono::Utc::now().timestamp());
+    }
+    *state.oneclick_tokens.lock().await = Some(crate::state::CachedOneClickTokens {
+        tokens: std::sync::Arc::new(prices),
+        fetched_at: std::time::Instant::now(),
+    });
     let app = crate::api::routes().with_state(state.clone());
     let (code, attempt) = call(
         &app,
@@ -402,7 +413,10 @@ async fn mock_lifecycle_runs_the_real_settlement_path_and_never_reuses_deposit_a
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(order.try_get::<Value, _>("asset").unwrap()["symbol"], "TKN");
+    assert_eq!(
+        order.try_get::<Value, _>("asset").unwrap()["symbol"],
+        "USDC"
+    );
     assert_eq!(order.try_get::<String, _>("amount").unwrap(), "1000000");
     assert_eq!(order.try_get::<String, _>("fee").unwrap(), "0");
     assert_eq!(order.try_get::<String, _>("net").unwrap(), "1000000");
@@ -438,6 +452,22 @@ async fn mock_lifecycle_runs_the_real_settlement_path_and_never_reuses_deposit_a
     )
     .await;
     assert_eq!(code, StatusCode::OK);
+    // Repeated processing polls must not reset the simulation's settlement clock.
+    crate::oneclick::test_hooks::worker_tick_for_test(&state)
+        .await
+        .unwrap();
+    let first_poll = attempt_row(&pool, &order_id).await;
+    let first_update: chrono::DateTime<chrono::Utc> = first_poll.try_get("updated_at").unwrap();
+    crate::oneclick::test_hooks::worker_tick_for_test(&state)
+        .await
+        .unwrap();
+    let second_poll = attempt_row(&pool, &order_id).await;
+    assert_eq!(
+        second_poll
+            .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
+            .unwrap(),
+        first_update
+    );
     sqlx::query("UPDATE one_click_attempts SET updated_at=NOW()-INTERVAL '1 hour'")
         .execute(&pool)
         .await

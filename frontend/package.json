@@ -9,7 +9,7 @@
     "clean:cache": "node scripts/clean-next-cache.mjs",
     "lint": "eslint",
     "test:near": "node --experimental-strip-types --test src/lib/near/amounts.test.mjs src/lib/near/proxy-response.test.mjs src/lib/near/spendable.test.mjs src/lib/near/api.test.mjs",
-    "test": "node --experimental-strip-types --test src/lib/near/amounts.test.mjs src/lib/near/proxy-response.test.mjs src/lib/near/spendable.test.mjs src/lib/near/api.test.mjs src/lib/crosschain/evm.test.mjs",
+    "test": "node --experimental-strip-types --test src/lib/near/amounts.test.mjs src/lib/near/proxy-response.test.mjs src/lib/near/spendable.test.mjs src/lib/near/api.test.mjs src/lib/crosschain/evm.test.mjs src/lib/crosschain/solana.test.mjs",
     "docs:export": "node scripts/export-docs.mjs"
   },
   "dependencies": {

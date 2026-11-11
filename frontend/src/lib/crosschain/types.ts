@@ -3,7 +3,7 @@ export interface OneClickToken {
   blockchain: string;
   symbol: string;
   decimals: number;
-  contractAddress: string;
+  contractAddress: string | null;
 }
 
 export interface OneClickQuote {

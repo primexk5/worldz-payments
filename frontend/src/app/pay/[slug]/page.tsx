@@ -24,6 +24,7 @@ type PageState = "loading"|"ready"|"claiming"|"awaiting-wallet"|"processing"|"se
 export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
   const [slug,setSlug]=useState("");
   const {accountId,wallet,connect,connecting}=useNearWallet();
+  const [crossChainActive,setCrossChainActive]=useState(false);
   const [link,setLink]=useState<PaymentLink|null>(null);
   const [claim,setClaim]=useState<LinkClaim|null>(null);
   const [order,setOrder]=useState<OrderStatus|null>(null);
@@ -119,7 +120,7 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
   const connectWallet=async()=>{setMessage(null);try{await connect();}catch(cause){setMessage(cause instanceof Error?cause.message:"Wallet connection failed.");}};
 
   const pay=async()=>{
-    if(!link)return;
+    if(!link||crossChainActive)return;
     if(!wallet||!accountId){await connectWallet();return;}
     setState("claiming");setMessage(null);setStorageIssue(null);
     try{
@@ -179,8 +180,8 @@ export default function PayLinkPage({params}:{params:Promise<{slug:string}>}) {
         {state==="refunded"&&<div className="mt-4 rounded-xl border border-line bg-paper p-4 text-xs">The order was refunded. Check your wallet for the returned funds.</div>}
         {message&&<p role="alert" className="mt-4 rounded-xl border border-alert/20 bg-alert/5 p-3 text-xs leading-5 text-alert">{message}</p>}
         {storageIssue&&<div className="mt-4 rounded-xl border border-amber-500/25 bg-amber/10 p-4"><p className="text-xs leading-5">The token requires storage registration for {storageIssue.accountIds.length} receiving account(s). Required deposit is {formatAssetAmount(storageIssue.minimumDeposit,{type:"native",symbol:"NEAR",decimals:24})} per account.</p><button onClick={()=>void registerStorage()} disabled={registering} className="mt-3 inline-flex h-9 items-center gap-2 rounded-full border border-line bg-white px-4 text-xs font-medium disabled:opacity-50">{registering?<LoaderCircle size={13} className="animate-spin"/>:<Check size={13}/>}Register token accounts</button></div>}
-        {state!=="processing"&&state!=="refunded"&&<button onClick={()=>void pay()} disabled={connecting||state==="claiming"||state==="awaiting-wallet"} className="mt-6 flex min-h-13 w-full items-center justify-center gap-2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{connecting||state==="claiming"||state==="awaiting-wallet"?<LoaderCircle size={16} className="animate-spin"/>:<WalletCards size={16} className="text-signal"/>}{!accountId?"Connect NEAR wallet":state==="claiming"?"Verify checkout in your wallet…":state==="awaiting-wallet"?"Approve in your wallet…":"Pay with NEAR wallet"}<ArrowRight size={14}/></button>}
-        {state!=="processing"&&state!=="refunded"&&!isServiceCheckout&&link&&<CrossChainPanel slug={slug} link={link} onSettled={(orderId,merchantId)=>void crossChainSettled(orderId,merchantId)}/>}
+        {state!=="processing"&&state!=="refunded"&&<button onClick={()=>void pay()} disabled={crossChainActive||connecting||state==="claiming"||state==="awaiting-wallet"} className="mt-6 flex min-h-13 w-full items-center justify-center gap-2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-paper transition hover:bg-ink/90 disabled:opacity-50">{connecting||state==="claiming"||state==="awaiting-wallet"?<LoaderCircle size={16} className="animate-spin"/>:<WalletCards size={16} className="text-signal"/>}{crossChainActive?"Cross-chain payment in progress":!accountId?"Connect NEAR wallet":state==="claiming"?"Verify checkout in your wallet…":state==="awaiting-wallet"?"Approve in your wallet…":"Pay with NEAR wallet"}<ArrowRight size={14}/></button>}
+        {state!=="processing"&&state!=="refunded"&&!isServiceCheckout&&link&&<CrossChainPanel slug={slug} link={link} onPaymentActiveChange={setCrossChainActive} onSettled={(orderId,merchantId)=>void crossChainSettled(orderId,merchantId)}/>}
         <p className="mt-4 flex items-center justify-center gap-2 text-center text-[11px] leading-5 text-mist"><ShieldCheck size={13} className="shrink-0 text-green-deep"/>Your keys stay in your wallet. Check order status before retrying a pending payment.</p>
       </div></div>}
     </section></div></main>;
