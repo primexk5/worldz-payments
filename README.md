@@ -6,6 +6,24 @@ WorldzPayments is a NEAR payment platform for merchants and their customers. It 
 
 [Website](https://worldz-payments.vercel.app) · [Watch the demo](https://worldz-payments.vercel.app/checkout/demo) · [Product documentation](https://worldz-payments.vercel.app/docs)
 
+## NEAR Hackathon — Real-World Money
+
+WorldzPayments is submitted to the **Real-World Money** track. It addresses a practical merchant problem: accepting a wallet payment is only the first step; sellers also need a payment request tied to an order, a payout they can verify, a receipt, and a record they can reconcile. NEAR provides the customer and merchant identities, signed wallet approval, low-cost settlement, native NEAR and NEP-141 assets, and the public transaction and receipt evidence used by the application.
+
+### Judge-ready testnet journey
+
+The hosted product is at [worldz-payments.vercel.app](https://worldz-payments.vercel.app). To reproduce the native payment journey with a small amount of testnet NEAR:
+
+1. Connect a compatible **NEAR testnet** wallet and sign in as a merchant.
+2. In **Dashboard → Payment links**, create a link with native NEAR, a small test amount, and a description, then open the generated `/pay/{slug}` URL.
+3. Connect the payer's testnet wallet, review the gross amount, 0.30% platform fee, merchant net amount, and payout account, then approve the wallet transaction.
+4. Wait for checkout to move beyond transaction submission to **Payment settled**. Open the receipt and confirm it contains a non-empty settlement reference; the merchant dashboard should show the same `SETTLED` order.
+5. Use the receipt's transaction link to inspect the testnet transaction. The successful result is the router's completed merchant and fee payout legs, not merely the initial wallet transaction hash.
+
+This browser-to-settlement journey was manually exercised successfully against the deployed testnet stack on **12 November 2026**, including wallet authentication, order authorization, wallet approval, indexed payout reconciliation, the `SETTLED` status, and receipt generation. The repeatable acceptance record and limitations are maintained in [`frontend/NEAR_INTEGRATION_STATUS.md`](frontend/NEAR_INTEGRATION_STATUS.md).
+
+This is a testnet prototype: testnet assets have no monetary value, the contracts are not represented as audited, and mainnet needs a separate deployment and operational review. The Nigeria bill-payment experience uses the VTpass sandbox and does not deliver real services. Testnet cross-chain mode is simulated; a judge verifying the live wallet flow should use native testnet NEAR as described above.
+
 ## What you can do
 
 - **Accept wallet payments:** native NEAR and configured NEP-141 fungible tokens.
@@ -198,7 +216,7 @@ Useful service checks:
 | Backend `/healthz` | Process liveness |
 | Backend `/readyz` | PostgreSQL readiness |
 | `/api/v1/network-config?networkId=testnet` | Public router, signer, and asset configuration through the frontend |
-| `/api/v1/payment-readiness?networkId=testnet` | Check that the configured signer matches the router before paying |
+| `/api/v1/payment-readiness?networkId=testnet` | Check that the configured signer, fee rate, and fee recipient match the router before paying |
 
 Source changes in this repository do not automatically prove that a deployed contract is running the same bytecode. Verify the intended network, deployed version, and settlement behavior as part of a release.
 

@@ -286,7 +286,7 @@ async fn get_payment_readiness(
     State(state): State<AppState>,
     Query(query): Query<NetworkQuery>,
 ) -> Result<StatusCode, ApiError> {
-    near_rpc::verify_order_signer(&state, query.network_id).await?;
+    near_rpc::verify_payment_configuration(&state, query.network_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

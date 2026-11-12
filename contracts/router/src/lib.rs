@@ -769,6 +769,9 @@ impl Router {
         if payload.fee_bps > MAX_FEE_BPS {
             return Err("fee exceeds the 500 bps cap".into());
         }
+        if payload.fee_bps != self.fee_bps {
+            return Err("authorization fee rate does not match router configuration".into());
+        }
         if payload.expires_at_seconds > 0 && now_seconds() >= payload.expires_at_seconds {
             return Err("authorization expired".into());
         }
@@ -776,8 +779,11 @@ impl Router {
             .map_err(|_| "invalid merchant account ID".to_string())?;
         account_id(&payload.payout_account_id)
             .map_err(|_| "invalid payout account ID".to_string())?;
-        account_id(&payload.fee_recipient_account_id)
+        let fee_recipient = account_id(&payload.fee_recipient_account_id)
             .map_err(|_| "invalid fee recipient account ID".to_string())?;
+        if fee_recipient != self.fee_recipient_account_id {
+            return Err("authorization fee recipient does not match router configuration".into());
+        }
         if let Some(expected) = payload.expected_payer_account_id.as_ref() {
             account_id(expected).map_err(|_| "invalid expected payer account ID".to_string())?;
         }
@@ -1197,6 +1203,32 @@ mod tests {
         assert!(
             !router.on_payout_result(order_key, LegKind::Fee, fee_attempt),
             "duplicate callback must be ignored"
+        );
+    }
+
+    #[test]
+    fn authorization_must_match_admin_configured_fee_rate() {
+        let (router, signing_key, _router_id, _admin, payer, _fee) = deployment();
+        let mut authorization = payload();
+        authorization.fee_bps = DEFAULT_FEE_BPS + 1;
+        let signature = sign(&authorization, &signing_key);
+
+        assert_eq!(
+            router.validate_authorization(&authorization, &signature, &payer),
+            Err("authorization fee rate does not match router configuration".into())
+        );
+    }
+
+    #[test]
+    fn authorization_must_match_admin_configured_fee_recipient() {
+        let (router, signing_key, _router_id, _admin, payer, _fee) = deployment();
+        let mut authorization = payload();
+        authorization.fee_recipient_account_id = "attacker.testnet".into();
+        let signature = sign(&authorization, &signing_key);
+
+        assert_eq!(
+            router.validate_authorization(&authorization, &signature, &payer),
+            Err("authorization fee recipient does not match router configuration".into())
         );
     }
 

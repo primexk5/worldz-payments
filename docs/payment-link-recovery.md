@@ -28,7 +28,8 @@ changed unintentionally, restore the original server seed instead of changing
 the registered public key. Do not generate a new signer seed during redeploys.
 
 Run the checker again and require `signerMatches: true`. Deploy the backend and
-frontend changes together: the updated frontend uses `/payment-readiness`.
+frontend changes together: the updated frontend uses `/payment-readiness`, which
+also requires the backend's fee rate and recipient to match `get_config` on the router.
 New claims check the finalized router signer before consuming a link claim;
 wallet submissions also check readiness, including retries of existing claims.
 The storage query uses the deployed v1 router's Borsh `signer_keys` LookupMap.

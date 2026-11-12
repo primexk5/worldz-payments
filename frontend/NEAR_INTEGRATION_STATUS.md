@@ -19,11 +19,27 @@ Checked the public NEAR Connect manifest on 2026-11-03: https://raw.githubuserco
 | NEAR Mobile | No | Yes | Yes | Android, iOS |
 | HOT Wallet | Not declared in the current manifest entry | Yes | Yes | Chrome, Firefox, Android, iOS |
 
-The connector is configured to require testnet, message signing, and transaction signing, so wallets that do not declare all three capabilities are filtered out. Meteor and Nightly are the initial testnet candidates. No live wallet/browser transaction has been recorded in this workspace yet.
+The connector is configured to require testnet, message signing, and transaction signing, so wallets that do not declare all three capabilities are filtered out. Meteor and Nightly are the initial testnet candidates.
+
+## Manual end-to-end testnet validation
+
+On **12 November 2026**, the deployed browser flow was manually exercised successfully from wallet connection through verified settlement. The acceptance journey covered:
+
+1. merchant wallet sign-in and payment-link creation;
+2. payer wallet connection and ownership proof;
+3. backend issuance of the payer-bound signed order;
+4. browser-wallet approval of the native testnet NEAR payment;
+5. router execution of the merchant and platform-fee payout legs;
+6. finalized event indexing and reconciliation to `SETTLED`; and
+7. display of the verified receipt with a non-empty settlement receipt identifier.
+
+Pass criteria require the merchant dashboard and customer checkout to show the same settled order and require `settlementReceiptId` to be present. A wallet redirect or transaction hash by itself is not a pass. Transaction, order, receipt, and wallet identifiers are intentionally not committed here; preserve them in the private submission evidence and use the public explorer link exposed by the receipt during judging.
+
+This is a manual acceptance record for the configured hosted testnet deployment, not an automated test or a claim about mainnet. Re-run it after changing the deployed router bytecode, signer, fee configuration, RPC/indexer setup, backend, or checkout transaction construction.
 
 ## Integration boundary
 
-The frontend targets the versioned API models in `src/lib/near/types.ts` and the API routes in `src/lib/near/api.ts`. The Rust API, router, and sandbox flows are implemented in the workspace, while `NEXT_PUBLIC_NEAR_CONTRACT_ID` remains an example placeholder. Do not treat the dashboard or checkout as a completed TestNet integration until PostgreSQL, API signer configuration, the router, and browser wallet flows have been exercised together.
+The frontend targets the versioned API models in `src/lib/near/types.ts` and the API routes in `src/lib/near/api.ts`. The Rust API, router, and sandbox flows are implemented in the workspace, while the checked-in environment template keeps `NEXT_PUBLIC_NEAR_CONTRACT_ID` as a placeholder. The deployed testnet integration has been exercised as recorded above; a fresh local or redeployed environment must still be validated with its own PostgreSQL, API signer, router, and browser-wallet configuration.
 
 Payout account entries are checked through NEAR's `view_account` RPC before the frontend asks the merchant identity wallet to sign the destination update; the backend still performs its own account and signature validation.
 

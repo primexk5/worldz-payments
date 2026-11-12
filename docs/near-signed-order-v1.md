@@ -29,6 +29,8 @@ This is the shared frontend/backend/router authorization encoding. It is an appl
 
 Native NEAR uses 24 decimals. NEP-141 decimals come from `ft_metadata`; no EVM address or decimal assumptions are used.
 
+The router treats its admin-controlled fee configuration as authoritative. Both `feeBps` and `feeRecipientAccountId` in an authorization must exactly match the router's current `get_config` values, in addition to the 500 bps hard cap. Changing either router setting invalidates unsubmitted authorizations issued under the previous setting; the backend readiness check must pass before it issues or submits a replacement authorization.
+
 ## Replay key
 
 Permanent replay prevention hashes the separate Borsh tuple `(protocolVersion, networkId, contractId, merchantId, orderId, nonce)` with prefix `worldz.near.order-replay/v1\0`. Orders and cancellations must retain this marker across archival and upgrades.

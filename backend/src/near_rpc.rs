@@ -1,12 +1,16 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
-use worldz_near_protocol::NetworkId;
+use worldz_near_protocol::{NetworkId, DEFAULT_FEE_BPS};
 
 use crate::{error::ApiError, state::AppState};
 
 /// The deployed v1 router uses a legacy LookupMap with this Borsh storage key.
-/// Check before creating a claim so a changed server seed cannot cost a payer gas.
-pub async fn verify_order_signer(state: &AppState, network_id: NetworkId) -> Result<(), ApiError> {
+/// Check every signed term governed by router configuration before creating a
+/// claim so stale backend configuration cannot cost a payer gas.
+pub async fn verify_payment_configuration(
+    state: &AppState,
+    network_id: NetworkId,
+) -> Result<(), ApiError> {
     let network = state.config.network(network_id);
     let router = network
         .router_id
@@ -32,7 +36,26 @@ pub async fn verify_order_signer(state: &AppState, network_id: NetworkId) -> Res
         tracing::error!(router, key_id = %network.signer_key_id, "API signer does not match the router's enabled public key");
         return Err(ApiError::unavailable("The merchant's payment signing configuration needs an update. No payment was submitted. Please try again after the merchant fixes it."));
     }
+    let expected_fee_recipient = network
+        .fee_recipient
+        .as_deref()
+        .ok_or_else(|| ApiError::unavailable("Fee recipient is not configured."))?;
+    let config = view_function(state, network_id, router, "get_config", json!({})).await?;
+    if !fee_config_matches(&config, DEFAULT_FEE_BPS, expected_fee_recipient) {
+        tracing::error!(
+            router,
+            expected_fee_bps = DEFAULT_FEE_BPS,
+            expected_fee_recipient,
+            "API fee configuration does not match the router"
+        );
+        return Err(ApiError::unavailable("The merchant's fee configuration needs an update. No payment was submitted. Please try again after the merchant fixes it."));
+    }
     Ok(())
+}
+
+fn fee_config_matches(config: &Value, fee_bps: u16, fee_recipient: &str) -> bool {
+    config.get("feeBps").and_then(Value::as_u64) == Some(u64::from(fee_bps))
+        && config.get("feeRecipientAccountId").and_then(Value::as_str) == Some(fee_recipient)
 }
 
 fn signer_matches(result: &Value, storage_key: &[u8], public_key: &[u8; 32]) -> bool {
@@ -219,6 +242,25 @@ mod signer_tests {
             &json!({"values": [{"key": STANDARD.encode(key), "value": "invalid"}]}),
             key,
             &public
+        ));
+    }
+
+    #[test]
+    fn router_fee_config_must_match_the_authorization_source() {
+        let config = json!({
+            "feeBps": DEFAULT_FEE_BPS,
+            "feeRecipientAccountId": "fees.testnet"
+        });
+        assert!(fee_config_matches(&config, DEFAULT_FEE_BPS, "fees.testnet"));
+        assert!(!fee_config_matches(
+            &config,
+            DEFAULT_FEE_BPS + 1,
+            "fees.testnet"
+        ));
+        assert!(!fee_config_matches(
+            &config,
+            DEFAULT_FEE_BPS,
+            "other.testnet"
         ));
     }
 }

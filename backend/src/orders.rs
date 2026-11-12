@@ -34,7 +34,7 @@ pub async fn claim_link(
     let payer = payer_account_id
         .parse::<near_account_id::AccountId>()
         .map_err(|_| ApiError::bad_request("Invalid payer account ID."))?;
-    near_rpc::verify_order_signer(state, network_id).await?;
+    near_rpc::verify_payment_configuration(state, network_id).await?;
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query(
         "SELECT l.*, m.account_id AS merchant_account_id, m.payout_account_id AS payout_account_id \
@@ -112,12 +112,17 @@ pub async fn claim_link(
             serde_json::from_value(existing.try_get("authorization")?)
                 .map_err(|_| ApiError::internal())?;
         let signer = network.signer.as_ref().ok_or_else(ApiError::internal)?;
+        let fee_recipient = network
+            .fee_recipient
+            .as_deref()
+            .ok_or_else(|| ApiError::unavailable("Fee recipient is not configured."))?;
+        let (fee, net) = apply_fee_config(&mut signed, fee_recipient)?;
         resign_authorization(&mut signed, &network.signer_key_id, signer)?;
         let mut authorization = serde_json::to_value(&signed).map_err(|_| ApiError::internal())?;
         authorization["asset"] = row.try_get("asset")?;
         let order_id: String = existing.try_get("order_id")?;
-        sqlx::query("UPDATE orders SET \"authorization\" = ?, customer_name = COALESCE(?, customer_name), edit_token_hash=?, reserved_until=to_timestamp(?), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?")
-            .bind(&authorization).bind(customer_name).bind(&edit_hash[..]).bind(signed.payload.expires_at_seconds as f64).bind(&order_id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE orders SET \"authorization\" = ?, fee = ?, net = ?, customer_name = COALESCE(?, customer_name), edit_token_hash=?, reserved_until=to_timestamp(?), updated_at = UTC_TIMESTAMP(6) WHERE order_id = ?")
+            .bind(&authorization).bind(fee.to_string()).bind(net.to_string()).bind(customer_name).bind(&edit_hash[..]).bind(signed.payload.expires_at_seconds as f64).bind(&order_id).execute(&mut *tx).await?;
         tx.commit().await?;
         return Ok(LinkClaimDto {
             edit_token,
@@ -233,6 +238,26 @@ pub async fn claim_link(
         payer_account_id: payer.to_string(),
         authorization,
     })
+}
+
+fn apply_fee_config(
+    signed: &mut SignedAuthorization,
+    fee_recipient: &str,
+) -> Result<(u128, u128), ApiError> {
+    signed.payload.fee_bps = DEFAULT_FEE_BPS;
+    signed.payload.fee_recipient_account_id = fee_recipient.to_owned();
+    let fee = signed
+        .payload
+        .amount
+        .checked_mul(u128::from(DEFAULT_FEE_BPS))
+        .ok_or_else(ApiError::internal)?
+        / 10_000;
+    let net = signed
+        .payload
+        .amount
+        .checked_sub(fee)
+        .ok_or_else(ApiError::internal)?;
+    Ok((fee, net))
 }
 
 fn new_edit_token() -> String {
@@ -983,8 +1008,8 @@ mod tests {
     }
 
     use super::{
-        failed_before_processing, leg_succeeded, normalized_customer_name, resign_authorization,
-        submission_matches,
+        apply_fee_config, failed_before_processing, leg_succeeded, normalized_customer_name,
+        resign_authorization, submission_matches, DEFAULT_FEE_BPS,
     };
     use base64::{engine::general_purpose::STANDARD, Engine};
     use serde_json::json;
@@ -1029,10 +1054,19 @@ mod tests {
         let replay_key = signed.payload.replay_key().unwrap();
         let order_id = signed.payload.order_id.clone();
         let signer = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        signed.payload.fee_bps = 1;
+        signed.payload.fee_recipient_account_id = "old-fees.testnet".into();
+        let (fee, net) = apply_fee_config(&mut signed, "current-fees.testnet").unwrap();
         resign_authorization(&mut signed, "rotated-key", &signer).unwrap();
         assert_eq!(signed.payload.expires_at_seconds, 1_800_000_000);
         assert_eq!(signed.payload.replay_key().unwrap(), replay_key);
         assert_eq!(signed.payload.order_id, order_id);
+        assert_eq!(signed.payload.fee_bps, DEFAULT_FEE_BPS);
+        assert_eq!(
+            signed.payload.fee_recipient_account_id,
+            "current-fees.testnet"
+        );
+        assert_eq!(fee + net, signed.payload.amount);
         let signature =
             ed25519_dalek::Signature::from_slice(&STANDARD.decode(&signed.signature).unwrap())
                 .unwrap();
