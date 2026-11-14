@@ -5,9 +5,12 @@
   "product": "1 × SecureKey Hardware Wallet",
   "storefront": {
     "repository": "https://github.com/primexk5/Shopify",
-    "sourceCommit": "f9a356424f72232e7d011cb10c1b9e7aa1a90e4d",
+    "sourceCommit": "b3f480885f4665d7dd7f3de1449e22ef886a274a",
     "userIdentifiedUrl": "https://frontend-roan-seven-b3zytmv7iu.vercel.app",
-    "deployedRevisionIndependentlyVerified": false,
+    "vercelProductionAlias": "https://frontend-roan-seven-b3zytmv7iu.vercel.app",
+    "vercelDeploymentId": "dpl_APaTi6aavPD57GDLvyRKYVRRAqZM",
+    "vercelDeploymentUrl": "https://frontend-uw3nl71qi-newkings-projects.vercel.app",
+    "deployedRevisionIndependentlyVerified": true,
     "nativeShopifyOrderSynchronizationTested": false
   },
   "localWorldzSourceCommit": "2064d327bb5530b66abb1ea0ffe87afaf790f04f",
@@ -97,15 +100,40 @@
     "userReport": "webhook payments works",
     "senderObservation": {
       "eventId": "testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1",
-      "state": "failed",
-      "attempts": 10,
-      "updatedAtMs": 1794647440106,
-      "lastErrorSummary": "Receiver returned HTTP 404",
-      "observedAtUtc": "2026-11-14T09:12:39.455992+00:00"
+      "state": "delivered",
+      "attempts": 1,
+      "updatedAtMs": 1794661416949,
+      "updatedAtUtc": "2026-11-14T13:03:36.949Z",
+      "lastErrorSummary": null,
+      "observedAtUtc": "2026-11-14T13:12:57.289788+00:00"
     },
-    "receiverEvidenceCaptured": false,
-    "signatureIndependentlyVerified": false,
-    "deliveryIndependentlyVerified": false,
+    "receiverEvidenceCaptured": true,
+    "signatureIndependentlyVerified": true,
+    "deliveryIndependentlyVerified": true,
+    "receiverEvidence": {
+      "initialCallbackUrl": "https://frontend-roan-seven-b3zytmv7iu.vercel.app/webhooks/worldz",
+      "callbackUrl": "https://frontend-roan-seven-b3zytmv7iu.vercel.app/api/webhooks/worldz",
+      "staleDeploymentProbe": {
+        "status": 503,
+        "errorSummary": "Evidence storage unavailable; retry delivery"
+      },
+      "updatedDeploymentAliasedToProduction": true,
+      "publicRouteGetStatus": 405,
+      "signedUnsupportedEventStatus": 400,
+      "tamperedRawBodyStatus": 401,
+      "laterSignedOperatorReplay": {
+        "status": 200,
+        "result": "duplicate",
+        "signatureVerified": true
+      },
+      "durableReceipt": {
+        "eventId": "testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1",
+        "acceptedAtUtc": "2026-11-14T13:03:36.580322Z",
+        "rawBodySha256": "d43c92c05172ceb64fa394bda23c8863b68da8ff0c36ae1ff3a1b5870db57c67",
+        "signatureVerified": true,
+        "recordedBeforeSenderDeliveryUpdate": true
+      }
+    },
     "senderObservations": [
       {
         "eventId": "testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1",
@@ -121,6 +149,15 @@
         "updatedAtMs": 1794647440106,
         "lastErrorSummary": "Receiver returned HTTP 404",
         "observedAtUtc": "2026-11-14T09:12:39.455992+00:00"
+      },
+      {
+        "eventId": "testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1",
+        "state": "delivered",
+        "attempts": 1,
+        "updatedAtMs": 1794661416949,
+        "updatedAtUtc": "2026-11-14T13:03:36.949Z",
+        "lastErrorSummary": null,
+        "observedAtUtc": "2026-11-14T13:12:57.289788+00:00"
       }
     ]
   },
@@ -150,8 +187,9 @@
     "User supplied the screenshots and identified the initiating storefront; the browser session was not independently controlled.",
     "Screenshot capture UTC timestamps are unknown; the receipt displays the payment timestamp.",
     "The configured public RPC is trusted; this is not a light-client proof or verification of deployed bytecode.",
-    "Local source revisions were recorded; deployed frontend/backend revisions and router code hash were not independently verified.",
-    "The user reported working webhooks; the latest captured sender result is failed after 10 attempts, with Receiver returned HTTP 404. No receiver-side accepted or signature-verification record was supplied.",
-    "No native Shopify order synchronization, goods fulfilment, actual sender retry success, or live duplicate/tamper acceptance test is established by this record."
+    "The deployed Shopify storefront revision was verified as b3f480885f4665d7dd7f3de1449e22ef886a274a; the deployed backend commit and router code hash were not independently verified.",
+    "Initial sender observations were pending and then failed after 10 attempts with Receiver returned HTTP 404. A later retry of the same settled event is verified as delivered after one attempt, with a matching signature-verified durable receiver receipt.",
+    "The signed replay and subsequent sender retry were idempotently acknowledged as a duplicate event. The unsupported-event and tampered-body probes did not create payments or receipts.",
+    "No native Shopify order synchronization or goods fulfilment is established by this record."
   ]
 }

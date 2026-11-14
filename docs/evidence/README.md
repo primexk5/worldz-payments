@@ -132,42 +132,40 @@ configured RPC; it is not a light-client proof or a check of deployed bytecode.
 
 ### Storefront webhook status
 
-The user reported **“webhook payments works.”** Independent sender observations
-for that exact event on **14 November 2026** show:
+The user reported **“webhook payments works.”** The first captured sender
+observations for that exact event on **14 November 2026** show:
 
 | Observed at (UTC) | Sender state | Attempts | Last error |
 | --- | --- | --- | --- |
 | 08:59:40 | `pending` | 8 | Not captured in this initial extract |
 | 09:12:39 | `failed` | 10 | Receiver returned HTTP 404 |
 
-Both observations are retained in the JSON record. No matching receiver-side
-accepted log, raw-body signature-verification result or successful sender
-delivery result was captured. The evidence establishes settlement and the
-authenticated merchant record; **successful webhook delivery is not
-established for this run**. HTTP 404 indicates that the configured receiving
-URL was not found. Verify the deployed receiver's hostname and route; the
-external storefront uses `/api/webhooks/worldz`, while the separate
-WorldzPayments website sample uses `/webhooks/worldz`.
+The original callback URL omitted the required `/api` path segment, so the sender
+received HTTP 404. After correcting the URL, the public storefront domain still
+served an older receiver deployment; a signed probe to that build returned HTTP
+503 because its local-file evidence storage was unavailable. The updated Shopify
+receiver was deployed, and the existing public storefront domain was aliased to
+that deployment. The callback URL stayed the same; no merchant secret or new
+payment was needed.
 
-This is a dated observation, not a claim that delivery can never succeed.
-To extend the evidence, capture a later `delivered` result for the same event
-and a matching accepted/signature-verified receiver record. Preserve any
-intermediate pending/failed observations. Investigate the saved callback path,
-secret, response code and persistent storage without sending another payment
-just to repair the notification. See the
-[developer configuration guide](../storefront-integration.md).
+After the alias change, the Worldz sender retried the existing settled event.
+The receiver recorded its durable receipt at 13:03:36 UTC, and the sender marked
+the delivery `delivered` after one attempt, less than a second later. An
+authenticated read returned that matching receipt and raw-body SHA-256. A later
+signed replay of the same event returned HTTP 200 with `result: duplicate` and
+`signatureVerified: true`, confirming idempotent acknowledgement. The current
+evidence therefore establishes successful receiver acceptance and sender
+delivery. The initial pending/failed observations remain in the JSON record for
+history. See the [developer configuration guide](../storefront-integration.md).
 
-The automatic sender exhausted its 10 attempts. Fixing the endpoint alone does
-not establish a subsequent delivery of this historical event; use the
-deployment's replay/requeue process and capture the resulting receiver and
-sender evidence before updating its status.
-
-The source revisions inspected are recorded in the JSON; deployed frontend and
-backend commits and router code hash were not independently verified. The
-standalone shop is in the [Shopify-named repository](https://github.com/primexk5/Shopify),
-but no native Shopify order synchronization, inventory fulfilment, successful
-sender retry, or live duplicate/tamper result is established by these captures.
-The screenshots are supplied evidence; their capture UTC timestamps are unknown.
+Additional receiver checks returned HTTP 400 for a correctly signed unsupported
+event and HTTP 401 after tampering with the signed raw body. Neither probe
+created a payment or a receipt. The deployment inspected through Vercel CLI was
+ready, and its source commit was `b3f4808` in the
+[Shopify-named repository](https://github.com/primexk5/Shopify). This verifies
+webhook delivery only; it does not establish native Shopify order
+synchronization or inventory fulfilment. The screenshots are supplied evidence;
+their capture UTC timestamps are unknown.
 
 ## Cross-chain sandbox evidence
 

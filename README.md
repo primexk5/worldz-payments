@@ -29,7 +29,7 @@ WorldzPayments is submitted to the **NEAR Hackathon Real-World Money** track.
 | Native and token sandbox tests | Actual local blockchain payout receipts, replay rejection, and upgrade compatibility | [Tests](contracts/router/tests/sandbox.rs) |
 | Fee-rotation recovery regression | An already-paid order still reconciles against its original terms after configuration changes | [Run and inspect the report](docs/evidence/README.md#reproduce-the-recovery-case) |
 | Storefront product checkout | User-identified product-page initiation; the 0.03 NEAR payment matches the supplied receipt, authenticated merchant API, finalized settlement event and router state | [Storefront evidence](docs/evidence/README.md#storefront-product-checkout) · [Exact record](docs/evidence/storefront-payment.json) |
-| Storefront webhook observation | The user reported working webhooks; the final sender observation at 09:12:39 UTC on 14 November 2026 was failed after 10 attempts, with HTTP 404 from the receiver. Receiver acceptance/signature evidence was not captured | [Delivery observation and limits](docs/evidence/README.md#storefront-webhook-status) |
+| Storefront webhook delivery | The original callback failed after 10 attempts with HTTP 404. After pointing the public storefront domain at the updated receiver, Worldz delivered the same settled event on retry (one attempt); a signature-verified durable receipt is recorded | [Delivery evidence](docs/evidence/README.md#storefront-webhook-status) |
 | Public on-chain settlement | A 1.5 testnet NEAR payment has matching finalized settlement evidence and succeeded payout legs | [Transaction](https://testnet.nearblocks.io/txns/9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN) · [Exact identifiers](docs/evidence/public-settlement.json) |
 | Earlier 1.5 NEAR dashboard/receipt | The earlier published merchant dashboard and receipt match that verified public transaction, settlement reference, and amounts. Webhook delivery is not included in that evidence | [Evidence status](docs/evidence/README.md#public-testnet-checkout) |
 
@@ -51,7 +51,7 @@ and public RPC checks independently matched the resulting payment:
 | Order | `ord_e46c0409e04e4f52ae295e988dbd4d28` |
 | Public transaction | [CvsZPAg47…](https://testnet.nearblocks.io/txns/CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE) |
 | Settlement / router result | `SETTLED`; merchant and fee legs `succeeded` |
-| Webhook | Sender status `failed`, 10 attempts, receiver HTTP 404; receiver acceptance/signature evidence not captured |
+| Webhook | Initially failed after 10 attempts with HTTP 404; after receiver deployment/alias correction, sender status `delivered` on retry (1 attempt), with a verified durable receiver receipt |
 
 ![User-identified storefront with product Pay with NEAR buttons](docs/evidence/screenshots/storefront-product-page.png)
 
