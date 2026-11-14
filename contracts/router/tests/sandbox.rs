@@ -106,6 +106,12 @@ async fn sandbox_native_exact_payment_snapshots_fee_and_survives_router_redeploy
         env!("CARGO_MANIFEST_DIR")
     );
     let router_wasm = wasm("WORLDZ_ROUTER_WASM", &router_default)?;
+    // Optionally test compatibility from an actual deployed predecessor. The
+    // replacement always uses WORLDZ_ROUTER_WASM, including its exact hash.
+    let previous_wasm = match std::env::var("WORLDZ_PREVIOUS_ROUTER_WASM") {
+        Ok(path) => std::fs::read(path)?,
+        Err(_) => router_wasm.clone(),
+    };
     let worker = near_workspaces::sandbox().await?;
     let admin = worker.dev_create_account().await?;
     let guardian = worker.dev_create_account().await?;
@@ -113,7 +119,7 @@ async fn sandbox_native_exact_payment_snapshots_fee_and_survives_router_redeploy
     let payout = worker.dev_create_account().await?;
     let payer = worker.dev_create_account().await?;
     let fee = worker.dev_create_account().await?;
-    let router = init_router(&worker, &router_wasm, &admin, &guardian, &fee, vec![]).await?;
+    let router = init_router(&worker, &previous_wasm, &admin, &guardian, &fee, vec![]).await?;
 
     let gross = 25 * YOCTO;
     let payload = auth(
@@ -131,24 +137,26 @@ async fn sandbox_native_exact_payment_snapshots_fee_and_survives_router_redeploy
     let order_key = hex::encode(payload.replay_key()?);
     let payout_before = payout.view_account().await?.balance.as_yoctonear();
     let fee_before = fee.view_account().await?.balance.as_yoctonear();
-    let before_attack: Value = router.view("get_config").await?.json()?;
-    let mut forged = payload.clone();
-    forged.merchant_account_id = payer.id().to_string();
-    let attack = payer
-        .call(router.id(), "cancel_authorization")
-        .args_json(json!({"authorization":forged,"signature":signature.clone()}))
-        .max_gas()
-        .transact()
-        .await?;
-    assert!(
-        attack.into_result().is_err(),
-        "forged merchant must not cancel a valid payment"
-    );
-    let after_attack: Value = router.view("get_config").await?.json()?;
-    assert_eq!(
-        before_attack["storageReserveYocto"],
-        after_attack["storageReserveYocto"]
-    );
+    if previous_wasm == router_wasm {
+        let before_attack: Value = router.view("get_config").await?.json()?;
+        let mut forged = payload.clone();
+        forged.merchant_account_id = payer.id().to_string();
+        let attack = payer
+            .call(router.id(), "cancel_authorization")
+            .args_json(json!({"authorization":forged,"signature":signature.clone()}))
+            .max_gas()
+            .transact()
+            .await?;
+        assert!(
+            attack.into_result().is_err(),
+            "forged merchant must not cancel a valid payment"
+        );
+        let after_attack: Value = router.view("get_config").await?.json()?;
+        assert_eq!(
+            before_attack["storageReserveYocto"],
+            after_attack["storageReserveYocto"]
+        );
+    }
     payer
         .call(router.id(), "pay_native")
         .args_json(json!({ "authorization": payload.clone(), "signature": signature.clone() }))
@@ -189,7 +197,27 @@ async fn sandbox_native_exact_payment_snapshots_fee_and_survives_router_redeploy
         "0"
     );
 
-    // Simulate an upgrade by redeploying the same state-compatible WASM to the same account.
+    // A second execution of the same signed payment must not schedule or pay
+    // either leg again, even after the first payment is fully settled.
+    let replay = payer
+        .call(router.id(), "pay_native")
+        .args_json(json!({"authorization":payload.clone(),"signature":signature.clone()}))
+        .deposit(NearToken::from_yoctonear(gross))
+        .gas(Gas::from_tgas(180))
+        .transact()
+        .await?;
+    assert!(replay.into_result().is_err());
+    assert_eq!(
+        payout.view_account().await?.balance.as_yoctonear(),
+        payout_before + gross - fee_amount
+    );
+    assert_eq!(
+        fee.view_account().await?.balance.as_yoctonear(),
+        fee_before + fee_amount
+    );
+
+    // Test state compatibility by deploying the candidate to the same account.
+    // This deliberately uses the sandbox account key, not the timelocked entrypoint.
     router
         .as_account()
         .deploy(&router_wasm)
@@ -203,6 +231,49 @@ async fn sandbox_native_exact_payment_snapshots_fee_and_survives_router_redeploy
             .json::<Value>()?["state"],
         "SETTLED"
     );
+
+    // The replay marker must survive, and the preserved signer/configuration
+    // must still allow a fresh payment after the replacement.
+    let replay_after_upgrade = payer
+        .call(router.id(), "pay_native")
+        .args_json(json!({"authorization":payload.clone(),"signature":signature}))
+        .deposit(NearToken::from_yoctonear(gross))
+        .gas(Gas::from_tgas(180))
+        .transact()
+        .await?;
+    assert!(replay_after_upgrade.into_result().is_err());
+    let mut fresh = payload;
+    fresh.order_id = "ord_sandbox_after_upgrade".into();
+    fresh.nonce[0] ^= 1;
+    let fresh_signature = self::signature(&fresh, &SigningKey::from_bytes(&[42; 32]));
+    let before_attack: Value = router.view("get_config").await?.json()?;
+    let mut forged = fresh.clone();
+    forged.merchant_account_id = payer.id().to_string();
+    let forged_cancellation = payer
+        .call(router.id(), "cancel_authorization")
+        .args_json(json!({"authorization":forged,"signature":fresh_signature.clone()}))
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(
+        forged_cancellation.into_result().is_err(),
+        "candidate must reject forged cancellation after upgrading"
+    );
+    let after_attack: Value = router.view("get_config").await?.json()?;
+    assert_eq!(
+        before_attack["storageReserveYocto"],
+        after_attack["storageReserveYocto"]
+    );
+    payer
+        .call(router.id(), "pay_native")
+        .args_json(json!({"authorization":fresh.clone(),"signature":fresh_signature}))
+        .deposit(NearToken::from_yoctonear(gross))
+        .gas(Gas::from_tgas(180))
+        .transact()
+        .await?
+        .into_result()?;
+    let after_upgrade = wait_settled(&router, &hex::encode(fresh.replay_key()?)).await?;
+    assert_eq!(after_upgrade["state"], "SETTLED");
     Ok(())
 }
 

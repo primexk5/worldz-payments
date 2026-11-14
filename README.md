@@ -163,6 +163,9 @@ Open `/pay/demo-cc`, choose **Pay with another chain**, connect Phantom or an EI
 
 ## Checks and contract builds
 
+See [router security assumptions and recovery limits](docs/router-security.md)
+and the [pending upgrade review](docs/router-upgrade-review.md).
+
 Run Rust unit tests from the repository root:
 
 ```sh
@@ -200,6 +203,23 @@ WORLDZ_ROUTER_WASM="$PWD/target/wasm32-unknown-unknown/contract/worldz_near_rout
 ```
 
 Sandbox tests need permission to open local sockets. The API and its background workers also require PostgreSQL and network access to the configured RPC services.
+
+To exercise the native sandbox upgrade from an earlier router binary, also set
+`WORLDZ_PREVIOUS_ROUTER_WASM` to that verified artifact. The test preserves an
+existing settlement and replay marker, checks cancellation authentication on the
+candidate, and settles a new payment after replacement. It uses direct sandbox
+deployment to test compatibility; upgrade authorization and timing have separate
+unit tests.
+
+The ordinary Rust checks do not need a database or live RPC. Database integration
+tests are ignored by default and create isolated schemas in an explicitly supplied
+**disposable** PostgreSQL database. To run the fee-rotation/delayed-reconciliation
+regression, which uses a local fake finalized RPC:
+
+```sh
+SECURITY_TEST_DATABASE_URL=postgres://USER:PASSWORD@localhost/DISPOSABLE_DB \
+  cargo test -p worldz-near-api orders_db_tests -- --ignored
+```
 
 ## Deployment
 
