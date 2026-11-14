@@ -35,6 +35,20 @@ WorldzPayments is submitted to the **NEAR Hackathon Real-World Money** track.
 
 The earlier manual run does not validate a later deployment. Public evidence must be refreshed after upgrading the router or changing the signer, fee configuration, indexer, backend, or checkout.
 
+### Current testnet router
+
+On **14 November 2026**, `router.newking.testnet` completed its reviewed,
+48-hour-timelocked upgrade to state version **2**. The deployed contract has
+SHA-256 `69f1b416c4fa479c82bbf6d25ffedabfd0e102bee85e042ad26d17ec247a04a8`,
+matching the reproducible reviewed artifact. The upgrade enforces the router's
+configured fee rate and fee recipient and rejects forged merchant cancellation
+attempts. See the [finalized upgrade transaction](https://testnet.nearblocks.io/txns/5vCnDPNPU2EswmpmWMyJvoaxS3NKjqA7qyB8iuP3B6TF)
+and [upgrade record](docs/router-upgrade-review.md).
+
+The public settlement evidence below predates this contract upgrade. It remains
+valid evidence for the earlier deployed version, but a fresh hosted settlement
+acceptance run is required before claiming post-upgrade end-to-end validation.
+
 ### Storefront acceptance run
 
 On **14 November 2026**, the merchant tested the **Pay with NEAR** button for
@@ -100,7 +114,7 @@ Checkout and the backend distinguish transaction submission from verified settle
 - **Custody window:** the router holds funds while asynchronous payouts or recovery remain unresolved. A failed callback may require operator investigation.
 - **Recovery:** confirmed failed legs can be retried. Full refunds are restricted when any payout succeeded; ambiguous callbacks are not blindly resent. Fee/signer rotation never rewrites an existing order's terms.
 - **Admin trust:** the admin controls fees, signers, token allowlists, recovery actions, and upgrades. The contract upgrade entrypoint has a minimum 48-hour delay; account-level FullAccess keys can bypass that entrypoint.
-- **Limits:** unaudited, testnet prototype; test assets have no monetary value. See the [threat model and recovery limits](docs/router-security.md) and [observed upgrade review](docs/router-upgrade-review.md). These documents distinguish reviewed source from deployed bytecode.
+- **Limits:** unaudited, testnet prototype; test assets have no monetary value. See the [threat model and recovery limits](docs/router-security.md) and [completed testnet upgrade record](docs/router-upgrade-review.md). These documents distinguish reviewed source, deployed bytecode, and end-to-end settlement evidence.
 
 ## Integrations and sandbox validation
 
@@ -267,7 +281,7 @@ This is a **cross-chain sandbox demonstration** of checkout and order processing
 ## Checks and contract builds
 
 See [router security assumptions and recovery limits](docs/router-security.md)
-and the [pending upgrade review](docs/router-upgrade-review.md).
+and the [completed testnet upgrade record](docs/router-upgrade-review.md).
 
 Run Rust unit tests from the repository root:
 

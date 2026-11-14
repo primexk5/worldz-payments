@@ -230,6 +230,6 @@ repository's **Actions** tab.
 
 Sandbox tests use a local blockchain and compiled WASM, not the public testnet.
 See the [build instructions](../../README.md#checks-and-contract-builds) and
-[upgrade review](../router-upgrade-review.md) for the source/artifact match and
+[upgrade record](../router-upgrade-review.md) for the source/artifact match and
 live-predecessor compatibility result. No public contract execution follows from
 a passing sandbox test.
