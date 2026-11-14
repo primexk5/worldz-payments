@@ -12,6 +12,8 @@ mod oneclick;
 mod oneclick_db_tests;
 mod orders;
 #[cfg(test)]
+mod orders_db_tests;
+#[cfg(test)]
 mod security_tests;
 mod shopify;
 mod state;

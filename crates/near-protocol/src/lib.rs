@@ -324,6 +324,31 @@ mod tests {
     }
 
     #[test]
+    fn replay_key_binds_every_domain_field() {
+        let payload = example_payload();
+        let key = payload.replay_key().unwrap();
+        for field in [
+            "protocol", "network", "contract", "merchant", "order", "nonce",
+        ] {
+            let mut other = payload.clone();
+            match field {
+                "protocol" => other.protocol_version += 1,
+                "network" => other.network_id = NetworkId::Mainnet,
+                "contract" => other.contract_id = "another.testnet".into(),
+                "merchant" => other.merchant_id.push_str("-other"),
+                "order" => other.order_id.push_str("-other"),
+                "nonce" => other.nonce[0] ^= 1,
+                _ => unreachable!(),
+            }
+            assert_ne!(
+                key,
+                other.replay_key().unwrap(),
+                "replay domain lost {field}"
+            );
+        }
+    }
+
+    #[test]
     fn canonical_authorization_signature_vector() {
         use ed25519_dalek::{Signer, SigningKey};
 

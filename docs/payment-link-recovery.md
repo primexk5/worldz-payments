@@ -68,6 +68,12 @@ order. A fresh reservation can then be issued. Verified settlements consume the
 redemption counter. Apply the included backend migration and deploy the updated
 frontend and backend together.
 
+Fee or signer rotation does not rewrite an existing order's authorization or
+financial terms, even if its database state is still `OPEN`. The payment may
+already have executed and be waiting for indexing. An unpaid authorization with
+outdated configuration must expire before the finalized no-order check permits
+a new order. Reconcile an executed payment against its original authorization.
+
 ## Validation
 
 ```sh

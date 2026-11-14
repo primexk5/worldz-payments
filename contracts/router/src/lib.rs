@@ -1233,6 +1233,278 @@ mod tests {
     }
 
     #[test]
+    fn authorization_expires_at_the_exact_deadline() {
+        let (router, key, router_id, _, payer, _) = deployment();
+        let authorization = payload();
+        let signature = sign(&authorization, &key);
+        testing_env!(context(
+            &router_id,
+            &payer,
+            0,
+            authorization.expires_at_seconds - 1
+        ));
+        assert!(router
+            .validate_authorization(&authorization, &signature, &payer)
+            .is_ok());
+        testing_env!(context(
+            &router_id,
+            &payer,
+            0,
+            authorization.expires_at_seconds
+        ));
+        assert_eq!(
+            router.validate_authorization(&authorization, &signature, &payer),
+            Err("authorization expired".into())
+        );
+    }
+
+    #[test]
+    fn authorization_rejects_a_different_payer() {
+        let (router, key, _, _, _, _) = deployment();
+        let authorization = payload();
+        assert_eq!(
+            router.validate_authorization(
+                &authorization,
+                &sign(&authorization, &key),
+                &id("other.testnet")
+            ),
+            Err("authorization is bound to a different payer".into())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "authorization asset is not native NEAR")]
+    fn native_entrypoint_rejects_a_signed_token_authorization() {
+        let (mut router, key, router_id, _, payer, _) = deployment();
+        router.set_token_allowed(id("token.testnet"), true);
+        let mut authorization = payload();
+        authorization.asset = Asset::Nep141 {
+            contract_id: "token.testnet".into(),
+        };
+        let signature = sign(&authorization, &key);
+        testing_env!(context(&router_id, &payer, GROSS, 1_900_000_001));
+        router.pay_native(authorization, signature);
+    }
+
+    #[test]
+    fn token_entrypoint_returns_the_full_amount_for_a_different_signed_token() {
+        let (mut router, key, router_id, _, payer, _) = deployment();
+        router.set_token_allowed(id("token.testnet"), true);
+        let mut authorization = payload();
+        authorization.asset = Asset::Nep141 {
+            contract_id: "other-token.testnet".into(),
+        };
+        let order_key = hex::encode(authorization.replay_key().unwrap());
+        let msg = json!({"action":"pay","signature":sign(&authorization, &key),"authorization":authorization}).to_string();
+        testing_env!(context(&router_id, &id("token.testnet"), 0, 1_900_000_001));
+        match router.ft_on_transfer(payer, U128(GROSS), msg) {
+            PromiseOrValue::Value(unused) => assert_eq!(unused.0, GROSS),
+            _ => panic!("wrong token must be returned immediately"),
+        }
+        assert!(router.get_order(order_key).is_none());
+        assert_eq!(router.get_liability(authorization.asset).0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "signed order already used or cancelled")]
+    fn payment_cannot_replay_while_payouts_are_pending() {
+        let (mut router, key, router_id, _, payer, _) = deployment();
+        let authorization = payload();
+        let signature = sign(&authorization, &key);
+        testing_env!(context(&router_id, &payer, GROSS, 1_900_000_001));
+        router.pay_native(authorization.clone(), signature.clone());
+        router.pay_native(authorization, signature);
+    }
+
+    #[test]
+    fn configuration_rotation_preserves_in_flight_payouts_and_duplicate_callbacks() {
+        let (mut router, key, router_id, admin, payer, old_fee_recipient) = deployment();
+        let authorization = payload();
+        let signature = sign(&authorization, &key);
+        let order_key = hex::encode(authorization.replay_key().unwrap());
+        testing_env!(context(&router_id, &payer, GROSS, 1_900_000_001));
+        router.pay_native(authorization, signature);
+        let processing = router.get_order(order_key.clone()).unwrap();
+        testing_env!(context(&router_id, &admin, 0, 1_900_000_002));
+        router.set_fee_config(100, id("new-fees.testnet"));
+        for (leg, attempt) in [
+            (LegKind::Merchant, processing.merchant_leg.attempt_id),
+            (LegKind::Fee, processing.fee_leg.attempt_id),
+        ] {
+            testing_env_with_promise_results(
+                context(&router_id, &router_id, 0, 1_900_000_003),
+                PromiseResult::Successful(vec![]),
+            );
+            router.on_payout_result(order_key.clone(), leg, attempt);
+        }
+        let settled = router.get_order(order_key.clone()).unwrap();
+        assert_eq!(settled.state, OrderState::Settled);
+        assert_eq!(settled.fee_bps, DEFAULT_FEE_BPS);
+        assert_eq!(settled.fee_recipient_account_id, old_fee_recipient.as_str());
+        assert_eq!(
+            settled.fee_leg.recipient_account_id,
+            old_fee_recipient.as_str()
+        );
+        assert_eq!(settled.fee.0, processing.fee.0);
+        assert_eq!(router.get_liability(Asset::Native).0, 0);
+        assert!(!router.on_payout_result(
+            order_key.clone(),
+            LegKind::Merchant,
+            processing.merchant_leg.attempt_id
+        ));
+        assert!(!router.on_payout_result(
+            order_key.clone(),
+            LegKind::Fee,
+            processing.fee_leg.attempt_id
+        ));
+        assert_eq!(
+            router.get_order(order_key).unwrap().state,
+            OrderState::Settled
+        );
+        assert_eq!(router.get_liability(Asset::Native).0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "full refund is only allowed when no payout leg succeeded")]
+    fn full_refund_is_blocked_after_a_partial_payout() {
+        let (mut router, key, router_id, _, payer, _) = deployment();
+        let authorization = payload();
+        let order_key = hex::encode(authorization.replay_key().unwrap());
+        testing_env!(context(&router_id, &payer, GROSS, 1_900_000_001));
+        router.pay_native(authorization.clone(), sign(&authorization, &key));
+        let processing = router.get_order(order_key.clone()).unwrap();
+        testing_env_with_promise_results(
+            context(&router_id, &router_id, 0, 1_900_000_002),
+            PromiseResult::Successful(vec![]),
+        );
+        router.on_payout_result(
+            order_key.clone(),
+            LegKind::Merchant,
+            processing.merchant_leg.attempt_id,
+        );
+        testing_env!(context(&router_id, &payer, 0, 1_900_000_003));
+        let _ = router.refund_order(order_key);
+    }
+
+    #[test]
+    fn stale_payout_callback_cannot_complete_a_new_retry() {
+        let (mut router, key, router_id, admin, payer, _) = deployment();
+        let authorization = payload();
+        let order_key = hex::encode(authorization.replay_key().unwrap());
+        testing_env!(context(&router_id, &payer, GROSS, 1_900_000_001));
+        router.pay_native(authorization.clone(), sign(&authorization, &key));
+        let attempt = router
+            .get_order(order_key.clone())
+            .unwrap()
+            .merchant_leg
+            .attempt_id;
+        testing_env_with_promise_results(
+            context(&router_id, &router_id, 0, 1_900_000_002),
+            PromiseResult::Failed,
+        );
+        assert!(!router.on_payout_result(order_key.clone(), LegKind::Merchant, attempt));
+        testing_env!(context(&router_id, &admin, 0, 1_900_000_003));
+        let _ = router.retry_payout(order_key.clone(), LegKind::Merchant);
+        let retry = router
+            .get_order(order_key.clone())
+            .unwrap()
+            .merchant_leg
+            .attempt_id;
+        assert_ne!(attempt, retry);
+        testing_env_with_promise_results(
+            context(&router_id, &router_id, 0, 1_900_000_004),
+            PromiseResult::Successful(vec![]),
+        );
+        assert!(!router.on_payout_result(order_key.clone(), LegKind::Merchant, attempt));
+        assert_eq!(
+            router
+                .get_order(order_key.clone())
+                .unwrap()
+                .merchant_leg
+                .state,
+            LegState::Pending
+        );
+        assert_eq!(router.get_liability(Asset::Native).0, GROSS);
+        assert!(!router.on_payout_result(order_key, LegKind::Merchant, retry));
+        assert_eq!(
+            router.get_liability(Asset::Native).0,
+            GROSS * u128::from(DEFAULT_FEE_BPS) / 10_000
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "admin only")]
+    fn payer_cannot_retry_a_payout() {
+        let (mut router, _, router_id, _, payer, _) = deployment();
+        testing_env!(context(&router_id, &payer, 0, 1_900_000_001));
+        let _ = router.retry_payout(hex::encode([0; 32]), LegKind::Merchant);
+    }
+
+    #[test]
+    #[should_panic(expected = "upgrade delay must be at least 48 hours")]
+    fn upgrade_proposal_cannot_shorten_the_minimum_delay() {
+        let (mut router, _, _, _, _, _) = deployment();
+        router.propose_upgrade(hex::encode([1; 32]), MIN_UPGRADE_DELAY_SECONDS - 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "upgrade timelock has not elapsed")]
+    fn proposed_upgrade_cannot_execute_early() {
+        let (mut router, _, _, _, _, _) = deployment();
+        router.propose_upgrade(
+            hex::encode(Sha256::digest(b"wasm")),
+            MIN_UPGRADE_DELAY_SECONDS,
+        );
+        let _ = router.execute_upgrade(b"wasm".to_vec());
+    }
+
+    #[test]
+    #[should_panic(expected = "WASM code hash does not match the proposal")]
+    fn mature_proposal_rejects_different_wasm() {
+        let (mut router, _, router_id, admin, _, _) = deployment();
+        router.propose_upgrade(
+            hex::encode(Sha256::digest(b"original")),
+            MIN_UPGRADE_DELAY_SECONDS,
+        );
+        testing_env!(context(
+            &router_id,
+            &admin,
+            0,
+            1_900_000_000 + MIN_UPGRADE_DELAY_SECONDS
+        ));
+        let _ = router.execute_upgrade(b"changed".to_vec());
+    }
+
+    #[test]
+    #[should_panic(expected = "admin only")]
+    fn payer_cannot_propose_an_upgrade() {
+        let (mut router, _, router_id, _, payer, _) = deployment();
+        testing_env!(context(&router_id, &payer, 0, 1_900_000_001));
+        router.propose_upgrade(hex::encode([1; 32]), MIN_UPGRADE_DELAY_SECONDS);
+    }
+
+    #[test]
+    fn replacing_a_proposal_restarts_the_delay_and_cancellation_clears_it() {
+        let (mut router, _, router_id, admin, _, _) = deployment();
+        router.propose_upgrade(hex::encode([1; 32]), MIN_UPGRADE_DELAY_SECONDS);
+        let first_deadline = router
+            .pending_upgrade
+            .as_ref()
+            .unwrap()
+            .executable_at_seconds;
+        testing_env!(context(&router_id, &admin, 0, first_deadline));
+        router.propose_upgrade(hex::encode([2; 32]), MIN_UPGRADE_DELAY_SECONDS);
+        let replacement = router.pending_upgrade.as_ref().unwrap();
+        assert_eq!(replacement.code_hash, [2; 32]);
+        assert_eq!(
+            replacement.executable_at_seconds,
+            first_deadline + MIN_UPGRADE_DELAY_SECONDS
+        );
+        router.cancel_upgrade();
+        assert!(router.pending_upgrade.is_none());
+    }
+
+    #[test]
     fn failed_payouts_keep_liability_and_a_failed_refund_is_safely_retryable() {
         let (mut router, signing_key, router_id, _admin, payer, _fee) = deployment();
         let authorization = payload();
@@ -1290,6 +1562,12 @@ mod tests {
             .refund_leg
             .attempt_id;
         assert_ne!(first_refund_attempt, retry_attempt);
+        testing_env_with_promise_results(
+            context(&router_id, &router_id, 0, 1_900_000_007),
+            PromiseResult::Successful(vec![]),
+        );
+        assert!(!router.on_refund_result(order_key.clone(), first_refund_attempt));
+        assert_eq!(router.get_liability(Asset::Native).0, GROSS);
         testing_env_with_promise_results(
             context(&router_id, &router_id, 0, 1_900_000_007),
             PromiseResult::Successful(vec![]),

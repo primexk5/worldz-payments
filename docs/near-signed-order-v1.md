@@ -29,7 +29,9 @@ This is the shared frontend/backend/router authorization encoding. It is an appl
 
 Native NEAR uses 24 decimals. NEP-141 decimals come from `ft_metadata`; no EVM address or decimal assumptions are used.
 
-The router treats its admin-controlled fee configuration as authoritative. Both `feeBps` and `feeRecipientAccountId` in an authorization must exactly match the router's current `get_config` values, in addition to the 500 bps hard cap. Changing either router setting invalidates unsubmitted authorizations issued under the previous setting; the backend readiness check must pass before it issues or submits a replacement authorization.
+The router treats its admin-controlled fee configuration as authoritative. Both `feeBps` and `feeRecipientAccountId` in an authorization must exactly match the router's current `get_config` values, in addition to the 500 bps hard cap. Changing either router setting invalidates unsubmitted authorizations issued under the previous setting. An order already accepted by the router keeps its original payout and fee terms.
+
+Reclaiming a link preserves an existing order's authorization, signature, financial terms, and deadline. Database `OPEN` state does not prove that payment has not started on-chain: indexing or reconciliation may be delayed. Even a finalized empty router lookup cannot rule out a payment still in flight. The backend releases an expired reservation only after finalized chain time reaches its signed deadline and a subsequent finalized router lookup returns no order. It then creates a new order with a new replay key and current configuration. Existing reservations are never extended or rewritten to refresh fees or signer keys. A payer holding outdated terms must wait for this verified expiry/replacement path; submitted payments retain their original terms for reconciliation.
 
 ## Replay key
 
