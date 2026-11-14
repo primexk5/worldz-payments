@@ -223,7 +223,6 @@ WORLDZ_API_KEY=YOUR_MERCHANT_API_KEY
 WORLDZ_MERCHANT_ID=mch_YOUR_WORKSPACE_ID
 WORLDZ_PAYOUT_ACCOUNT_ID=YOUR_PAYOUT_ACCOUNT.testnet
 WORLDZ_WEBHOOK_SIGNING_SECRET=YOUR_BACKEND_WEBHOOK_SIGNING_SECRET
-WORLDZ_EVIDENCE_DIR=
 ```
 
 Find Merchant ID with **Settings → Merchant profile → Copy ID**, the payout
@@ -233,9 +232,9 @@ secret must match it exactly. Keep credentials server-side and out of Git.
 
 Save `https://YOUR_STOREFRONT_HOST/api/webhooks/worldz` in the WorldzPayments
 merchant's **Webhook URL** field before starting a new checkout. The example
-receiver defaults to a local `.worldz-evidence` directory; Vercel and multiple
-instances require shared durable event storage. A filesystem path alone does
-not provide durable serverless deduplication. Verify settlement and webhook
+receiver persists verified receipts through the authenticated WorldzPayments
+API in PostgreSQL, so Vercel instances do not depend on local disk. Deploy the
+backend migration/API before the updated receiver. Verify settlement and webhook
 delivery independently; the API base, hosted checkout origin and receiving URL
 have different purposes.
 

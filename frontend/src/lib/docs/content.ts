@@ -205,7 +205,7 @@ WORLDZ_API_KEY=YOUR_MERCHANT_API_KEY
 WORLDZ_MERCHANT_ID=mch_YOUR_WORKSPACE_ID
 WORLDZ_PAYOUT_ACCOUNT_ID=YOUR_PAYOUT_ACCOUNT.testnet
 WORLDZ_WEBHOOK_SIGNING_SECRET=YOUR_BACKEND_WEBHOOK_SIGNING_SECRET
-WORLDZ_EVIDENCE_DIR=` },
+` },
       { type: "table", headers: ["Variable", "Expected value"], rows: [
         ["WORLDZ_API_BASE", "WorldzPayments frontend origin plus /api/v1; a direct backend connection uses its origin plus /v1."],
         ["WORLDZ_CHECKOUT_ORIGIN", "WorldzPayments frontend origin only. Leave off API, payment and webhook paths."],
@@ -213,7 +213,6 @@ WORLDZ_EVIDENCE_DIR=` },
         ["WORLDZ_MERCHANT_ID", "Settings → Merchant profile → Merchant ID → Copy ID."],
         ["WORLDZ_PAYOUT_ACCOUNT_ID", "Exact registered payout account. The receiver checks this against payment data."],
         ["WORLDZ_WEBHOOK_SIGNING_SECRET", "Exact WEBHOOK_SIGNING_SECRET of the sending backend deployment, provided by its operator."],
-        ["WORLDZ_EVIDENCE_DIR", "Optional local receiver directory. Blank defaults to .worldz-evidence inside the storefront frontend working directory."],
       ] },
       { type: "paragraph", text: "These variables belong to the external example storefront. The WorldzPayments app itself uses its own frontend/backend configuration. For an existing backend, reuse its current signing secret at the receiver; generating a new receiver-only secret breaks signature verification." },
       { type: "code", title: "Verify server credentials and workspace", language: "JavaScript", code: `// Server-side check; do not send the merchant key to browser code.
@@ -236,8 +235,9 @@ if (merchant.merchantId !== process.env.WORLDZ_MERCHANT_ID ||
         ["External example storefront", "Set WORLDZ_WEBHOOK_SIGNING_SECRET on the storefront. Callback: https://YOUR_STOREFRONT_HOST/api/webhooks/worldz."],
         ["WorldzPayments website sample", "Set WEBHOOK_SIGNING_SECRET on the WorldzPayments frontend to the backend's identical value (32+ characters) and redeploy. Callback: https://YOUR_WORLDZ_FRONTEND_HOST/webhooks/worldz."],
       ] },
-      { type: "paragraph", text: "The optional website receiver at /webhooks/worldz verifies the HMAC and basic event envelope, logs the event ID and returns 204. It has no durable storage, duplicate suppression, merchant/order binding or goods fulfilment. It is a signature-verification demo. Use the callback hostname/path and environment variable for the receiver you actually deployed; WORLDZ_EVIDENCE_DIR applies only to the external storefront receiver." },
-      { type: "callout", title: "Persistent receiver storage", text: "The example receiver records events on a single persistent local disk and performs no goods fulfilment. WORLDZ_EVIDENCE_DIR is optional; it does not make Vercel or another ephemeral filesystem durable. For serverless or multiple instances, use shared durable persistence with a unique event-ID constraint before returning 2xx or performing business actions. Keep raw evidence private." },
+      { type: "paragraph", text: "The optional website receiver at /webhooks/worldz verifies the HMAC and basic event envelope, logs the event ID and returns 204. It has no durable storage, duplicate suppression, merchant/order binding or goods fulfilment. It is a signature-verification demo. Use the callback hostname/path and environment variable for the receiver you actually deployed; The website sample does not use the external storefront’s durable receipt API." },
+      { type: "callout", title: "Durable receiver storage", text: "The storefront forwards the original signed bytes to authenticated POST /me/webhook-receipts. The backend verifies the signature again, matches the finalized merchant event and commits a unique receipt in PostgreSQL before acknowledgement. Deploy the backend migration/API first. No local Vercel disk or additional storage credentials are needed. The receiver performs no goods fulfilment." },
+      { type: "paragraph", text: "For an exhausted failed notification, correct its receiver configuration and select Retry webhook in Dashboard → Payments → Details, or call authenticated POST /me/deliveries/{eventId}/retry. Only the merchant’s failed delivery is requeued; pending/delivered records are unchanged. This resets delivery attempts and creates no new payment. Read the durable receipt with GET /me/webhook-receipts/{eventId}." },
       { type: "links", items: [
         { label: "Example storefront source", href: "https://github.com/primexk5/Shopify" },
         { label: "Complete configuration guide", href: "https://github.com/primexk5/worldz-payments/blob/main/docs/storefront-integration.md" },

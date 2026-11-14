@@ -154,6 +154,24 @@ fn config(database_url: String) -> AppConfig {
     }
 }
 
+#[tokio::test]
+async fn webhook_receipts_require_merchant_authentication() {
+    let url = "postgres://unused:unused@127.0.0.1:1/unused".to_string();
+    let pool = PgPoolOptions::new().connect_lazy(&url).unwrap();
+    let state = AppState::new(pool, config(url));
+    let app = Router::new().nest("/v1", api::routes()).with_state(state);
+    for (method, path) in [
+        ("POST", "/v1/me/webhook-receipts"),
+        ("GET", "/v1/me/webhook-receipts/evt"),
+        ("POST", "/v1/me/deliveries/evt/retry"),
+    ] {
+        assert_eq!(
+            call(&app, method, path, None, None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+}
+
 async fn call(
     app: &Router,
     method: &str,

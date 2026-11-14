@@ -91,6 +91,9 @@ export const nearApi = {
   updatePayoutAddress(input: { payoutAccountId: string; proof: { accountId: string; message: string; nonce: string; state: string; publicKey: string; signature: string } }) {
     return request<MerchantProfile>("/me/payouts", { method: "PUT", body: body({ ...input, networkId: NEAR_NETWORK_ID }) });
   },
+  retryWebhook(eventId: string) {
+    return request<{ eventId: string; state: "pending" }>(`/me/deliveries/${encodeURIComponent(eventId)}/retry`, { method: "POST" });
+  },
   deliveries() {
     return request<{ deliveries: DashboardDelivery[] }>("/me/deliveries");
   },

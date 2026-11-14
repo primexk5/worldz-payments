@@ -20,6 +20,7 @@ mod state;
 mod vtpass;
 #[cfg(test)]
 mod vtpass_db_tests;
+mod webhook_receipts;
 mod webhooks;
 mod workers;
 

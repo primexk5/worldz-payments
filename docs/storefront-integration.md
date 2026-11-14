@@ -43,7 +43,6 @@ WORLDZ_API_KEY=YOUR_MERCHANT_API_KEY
 WORLDZ_MERCHANT_ID=mch_YOUR_WORKSPACE_ID
 WORLDZ_PAYOUT_ACCOUNT_ID=YOUR_PAYOUT_ACCOUNT.testnet
 WORLDZ_WEBHOOK_SIGNING_SECRET=YOUR_BACKEND_WEBHOOK_SIGNING_SECRET
-WORLDZ_EVIDENCE_DIR=
 ```
 
 | Variable | Where it comes from / expected value |
@@ -54,7 +53,6 @@ WORLDZ_EVIDENCE_DIR=
 | `WORLDZ_MERCHANT_ID` | Settings → Merchant profile → Merchant ID → Copy ID. |
 | `WORLDZ_PAYOUT_ACCOUNT_ID` | Exact saved NEAR payout account. The receiver uses it to validate the notification's destination. |
 | `WORLDZ_WEBHOOK_SIGNING_SECRET` | Must equal `WEBHOOK_SIGNING_SECRET` in the WorldzPayments backend deployment sending the notifications (at least 32 characters). |
-| `WORLDZ_EVIDENCE_DIR` | Optional local receiver directory. Blank uses `.worldz-evidence` inside the storefront's `frontend` working directory. |
 
 These are **server-side variables for the example storefront**, separate from
 WorldzPayments' own `NEAR_BACKEND_URL` and `NEXT_PUBLIC_NEAR_*` configuration.
@@ -150,13 +148,13 @@ least 32 characters.
 
 | Receiving implementation | Server environment variable | Path / result |
 | --- | --- | --- |
-| External example storefront | `WORLDZ_WEBHOOK_SIGNING_SECRET` | `/api/webhooks/worldz`; validates testnet payment fields and writes local evidence before 200. |
+| External example storefront | `WORLDZ_WEBHOOK_SIGNING_SECRET` | `/api/webhooks/worldz`; validates testnet payment fields and commits a durable backend receipt before 200. |
 | WorldzPayments website sample | `WEBHOOK_SIGNING_SECRET` | `/webhooks/worldz`; verifies the signature/basic envelope, logs the event ID and returns 204. |
 
 The website sample performs no durable event storage, duplicate suppression,
 merchant/order binding or goods fulfilment. A 204 demonstrates signature and
 basic-envelope acceptance by that sample; it does not establish safe store
-fulfilment. The external storefront's `WORLDZ_EVIDENCE_DIR` does not configure
+fulfilment. The external storefront's durable receipt API does not configure
 the website sample. Choose the receiving implementation you actually deployed
 and use its matching hostname, route and environment variable.
 
@@ -176,13 +174,19 @@ The external example storefront's receiver:
   Backend retries get a new signed `created` timestamp; the payment data for
   that event must remain unchanged. Storage failures return 503 for retry.
 
-The example writes private JSON files to a local disk directory. This is useful
-for a single persistent-disk test server. Setting `WORLDZ_EVIDENCE_DIR` does not
-make an ephemeral/serverless filesystem durable. For Vercel or multiple server
-instances, implement shared durable persistence with a unique event-ID
-constraint before acknowledging or performing fulfilment. A temporary directory
-cannot establish durable duplicate suppression. The example receiver records
-payments; it performs no Shopify order synchronization or goods fulfilment.
+The storefront forwards the exact signed body to authenticated
+`POST /me/webhook-receipts` on its configured WorldzPayments API. The backend
+verifies the sender HMAC again, matches the data to the merchant's finalized
+event and commits a receipt in PostgreSQL with a unique event-ID constraint
+before acknowledgement. This works across Vercel instances without local disk
+or a new storage credential. Deploy backend migration
+`0011_webhook_receiver_receipts.sql` and the new API before this receiver.
+`WORLDZ_EVIDENCE_DIR` belongs to the older local helper and is unused by the
+current deployed receiving route. The receiver performs no goods fulfilment.
+
+Read a committed receipt with authenticated
+`GET /me/webhook-receipts/{eventId}`. It returns the event ID, raw-body SHA-256,
+acceptance time and signature-verification result, without raw payload or keys.
 
 The sender attempts delivery up to 10 times with exponential backoff. Repeated
 delivery is expected; a receiver-side duplicate must return success without
@@ -211,3 +215,13 @@ the sender's attempt limit.
 
 The recorded storefront acceptance run and its exact evidence boundaries are
 in [the evidence index](evidence/README.md#storefront-product-checkout).
+
+## Retry an exhausted delivery
+
+After correcting receiver configuration, open Dashboard → Payments → Details
+and select **Retry webhook**, or call authenticated
+`POST /me/deliveries/{eventId}/retry`. The backend requeues only a failed delivery
+owned by the authenticated merchant, resets its attempt counter and uses the
+current saved receiving URL. Pending and delivered events cannot be requeued
+through this action. It never creates a new payment. Capture the later delivered
+state and durable receipt; retain historical failed observations.
