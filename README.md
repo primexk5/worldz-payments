@@ -1,55 +1,87 @@
 # WorldzPayments
 
-**Payments for your business. Straight to your wallet.**
+**Know which order was paid—and whether the merchant actually received it.**
 
-WorldzPayments is a NEAR payment platform for merchants and their customers. It brings wallet-signed checkout, shareable payment links, receipts, merchant reporting, and Shopify product-page integration into one workspace.
+For independent merchants accepting NEAR wallet payments, a transaction hash is only the start.
+WorldzPayments connects a payment link to an authorized order, verifies the required merchant and fee payouts, and produces a receipt and reconciliation record.
+The prototype supports native NEAR and configured NEP-141 tokens on **NEAR testnet**.
 
-[Website](https://worldz-payments.vercel.app) · [Watch the demo](https://worldz-payments.vercel.app/checkout/demo) · [Product documentation](https://worldz-payments.vercel.app/docs)
+[Live testnet app](https://worldz-payments.vercel.app) · [Watch the 60-second product video](https://worldz-payments.vercel.app/checkout/demo) · [Verified testnet payment](https://testnet.nearblocks.io/txns/9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN) · [Evidence and verification](docs/evidence/README.md) · [Product docs](https://worldz-payments.vercel.app/docs)
 
-## NEAR Hackathon — Real-World Money
+[![Merchant dashboard and receipt for the verified 1.5 NEAR testnet payment](docs/evidence/screenshots/native-settlement-dashboard.png)](https://testnet.nearblocks.io/txns/9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN)
 
-WorldzPayments is submitted to the **Real-World Money** track. It addresses a practical merchant problem: accepting a wallet payment is only the first step; sellers also need a payment request tied to an order, a payout they can verify, a receipt, and a record they can reconcile. NEAR provides the customer and merchant identities, signed wallet approval, low-cost settlement, native NEAR and NEP-141 assets, and the public transaction and receipt evidence used by the application.
+*Merchant-provided dashboard screenshot: 1.5 NEAR settled, 1.4955 NEAR to the merchant, and 0.0045 NEAR in fees. The displayed transaction and settlement reference match finalized public chain data. Published unchanged with permission.*
 
-### Judge-ready testnet journey
+## Why use it?
 
-The hosted product is at [worldz-payments.vercel.app](https://worldz-payments.vercel.app). To reproduce the native payment journey with a small amount of testnet NEAR:
+A plain wallet transfer leaves the seller to match an amount and address to an order.
+WorldzPayments keeps the order, exact payment terms, merchant payout, receipt, and signed webhook together. It is a crypto checkout workflow for customers who already use NEAR wallets; it does not offer card acquiring, bank settlement, or a replacement for Stripe or Paystack's fiat services.
 
-1. Connect a compatible **NEAR testnet** wallet and sign in as a merchant.
-2. In **Dashboard → Payment links**, create a link with native NEAR, a small test amount, and a description, then open the generated `/pay/{slug}` URL.
-3. Connect the payer's testnet wallet, review the gross amount, 0.30% platform fee, merchant net amount, and payout account, then approve the wallet transaction.
-4. Wait for checkout to move beyond transaction submission to **Payment settled**. Open the receipt and confirm it contains a non-empty settlement reference; the merchant dashboard should show the same `SETTLED` order.
-5. Use the receipt's transaction link to inspect the testnet transaction. The successful result is the router's completed merchant and fee payout legs, not merely the initial wallet transaction hash.
+The core demonstration is **one merchant → one payment link → one verified settlement → one receipt**. Nigeria-focused services are an optional sandbox experiment, not the settlement rail for merchant payments.
 
-This browser-to-settlement journey was manually exercised successfully against the deployed testnet stack on **12 November 2026**, including wallet authentication, order authorization, wallet approval, indexed payout reconciliation, the `SETTLED` status, and receipt generation. The repeatable acceptance record and limitations are maintained in [`frontend/NEAR_INTEGRATION_STATUS.md`](frontend/NEAR_INTEGRATION_STATUS.md).
+## Verify the submission
 
-This is a testnet prototype: testnet assets have no monetary value, the contracts are not represented as audited, and mainnet needs a separate deployment and operational review. The Nigeria bill-payment experience uses the VTpass sandbox and does not deliver real services. Testnet cross-chain mode is simulated; a judge verifying the live wallet flow should use native testnet NEAR as described above.
+WorldzPayments is submitted to the **NEAR Hackathon Real-World Money** track.
 
-## What you can do
+| Evidence | What it establishes | Where to check |
+| --- | --- | --- |
+| Product video | A walkthrough of the intended experience | [Watch](https://worldz-payments.vercel.app/checkout/demo) |
+| Native and token sandbox tests | Actual local blockchain payout receipts, replay rejection, and upgrade compatibility | [Tests](contracts/router/tests/sandbox.rs) |
+| Fee-rotation recovery regression | An already-paid order still reconciles against its original terms after configuration changes | [Run and inspect the report](docs/evidence/README.md#reproduce-the-recovery-case) |
+| Public on-chain settlement | A 1.5 testnet NEAR payment has matching finalized settlement evidence and succeeded payout legs | [Transaction](https://testnet.nearblocks.io/txns/9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN) · [Exact identifiers](docs/evidence/public-settlement.json) |
+| Dashboard/receipt correlation | The published merchant dashboard and receipt match the verified public transaction, settlement reference, and amounts. Webhook delivery is not included in this evidence | [Evidence status](docs/evidence/README.md#public-testnet-checkout) |
 
-- **Accept wallet payments:** native NEAR and configured NEP-141 fungible tokens.
-- **Share payment links:** set an amount, description, expiry, and payment limit, or allow repeated payments.
-- **Give customers clear checkout details:** show the payment asset, payout destination, fee, and merchant net amount before approval.
-- **Issue verified receipts:** show completion after the service verifies the required on-chain payouts.
-- **Manage merchant activity:** view payments, balances, analytics, payout settings, and webhook deliveries.
-- **Connect a Shopify store:** start hosted NEAR checkout from a product-page app block and synchronize a paid order after verified settlement.
-- **Build custom integrations:** use the Rust API and the frontend wallet, authorization, and recovery helpers.
+The earlier manual run does not validate a later deployment. Public evidence must be refreshed after upgrading the router or changing the signer, fee configuration, indexer, backend, or checkout.
 
-The default configuration targets **NEAR testnet**. Mainnet requires its own contracts, accounts, signer configuration, and supported-token setup. The Shopify integration is a product-page checkout bridge, not a payment method inside Shopify’s native checkout. The native Shopify checkout payment app and walletless card or bank checkout remain planned.
+### Try the native testnet flow
 
-The dashboard includes **Subscription services** for Nigeria VTpass sandbox airtime, data, electricity, and one-time TV package purchases; more countries and local service providers are planned. Buyers approve each purchase with a NEAR testnet wallet and can pay in native NEAR or an enabled testnet stable token, including USDC.e and USDT.e where configured. TV packages are purchases; automatic renewals are not supported. Provider fulfillment starts only after verified NEAR testnet settlement. The VTpass host is pinned to `sandbox.vtpass.com`; test tokens are not converted to NGN and the preview does not deliver real services. See [Bills and subscriptions](docs/subscriptions.md).
+Use the [hosted app](https://worldz-payments.vercel.app); no local database or provider keys are needed to try it. Bring a compatible **NEAR testnet wallet** (for example Meteor or Nightly) and a small testnet balance for payment and gas. Recipient token-storage registration may be needed for NEP-141; use native NEAR for the shortest path.
 
-Eligible payment links can also offer **cross-chain payments** from supported Ethereum, Base, Arbitrum and Solana assets. Live swaps require the configured mainnet route and settle the link’s selected token on NEAR through NEAR Intents. Testnet cross-chain payments are simulated and send no real funds. See [Cross-chain pay-in](docs/cross-chain.md).
+1. Sign in as a merchant and create a small native-NEAR link in **Dashboard → Payment links**.
+2. Open its `/pay/{slug}` URL as the payer. Review the amount, payout account, platform fee, and merchant net amount.
+3. Approve the wallet transaction, then wait for **Payment settled**.
+4. Open the receipt. Require a non-empty settlement reference and the same `SETTLED` order in the merchant dashboard.
+5. Follow the transaction link and inspect the completed merchant and fee payout legs.
 
-## How a payment works
+If wallet/RPC/hosted services are unavailable, use the video for the product walkthrough and the local sandbox/recovery checks for engineering evidence. Neither substitutes for a fresh successful hosted checkout. Local service requirements are documented below.
 
-1. A merchant signs in with a wallet and creates a payment link.
-2. The customer opens the link and verifies wallet ownership to prepare checkout.
-3. The API issues an order authorization signed for the configured network, router, asset, amount, and payer.
-4. The customer reviews and approves the transaction in their wallet.
-5. The router processes merchant and platform-fee payout legs.
-6. The API reconciles finalized transaction receipts with router state before marking the order `SETTLED` and issuing a verified receipt.
+## How settlement becomes a receipt
 
-Wallet keys remain in the user’s wallet. During execution, the routing contract can hold funds while payouts complete. A wallet approval or transaction hash alone is not evidence of completed merchant settlement. Network gas and token storage registration are separate from the displayed platform fee.
+```mermaid
+flowchart LR
+    L[Merchant payment link] --> A[API signs payer-bound order]
+    A --> W[Customer approves in wallet]
+    W --> R[NEAR router reserves replay key]
+    R --> M[Merchant payout leg]
+    R --> F[Fee payout leg]
+    M --> C[Router callbacks track results]
+    F --> C
+    C --> E[Finalized settlement event]
+    E --> I[Indexer and backend reconciliation]
+    R -. Finalized router state .-> I
+    I --> P[SETTLED order and receipt]
+    P --> H[Signed merchant webhook]
+```
+
+Checkout and the backend distinguish transaction submission from verified settlement. Required payout legs must succeed, and reconciliation must match the finalized event against router state and the original authorized financial terms. The backend trusts its configured RPC providers; this is not a light-client proof.
+
+## Security model
+
+- **Signer trust:** the backend signer authorizes payment terms. Compromise can authorize malicious orders within router rules; merchant and payer wallet keys stay in their wallets.
+- **Custody window:** the router holds funds while asynchronous payouts or recovery remain unresolved. A failed callback may require operator investigation.
+- **Recovery:** confirmed failed legs can be retried. Full refunds are restricted when any payout succeeded; ambiguous callbacks are not blindly resent. Fee/signer rotation never rewrites an existing order's terms.
+- **Admin trust:** the admin controls fees, signers, token allowlists, recovery actions, and upgrades. The contract upgrade entrypoint has a minimum 48-hour delay; account-level FullAccess keys can bypass that entrypoint.
+- **Limits:** unaudited, testnet prototype; test assets have no monetary value. See the [threat model and recovery limits](docs/router-security.md) and [observed upgrade review](docs/router-upgrade-review.md). These documents distinguish reviewed source from deployed bytecode.
+
+## Integrations and sandbox validation
+
+| Flow | Boundary |
+| --- | --- |
+| Shopify product-page bridge | Starts hosted NEAR checkout and synchronizes an order after settlement. It is not a payment method inside Shopify's native checkout. |
+| Nigeria bills and service purchases | VTpass sandbox only: airtime, data, electricity, and one-time TV purchases. No real service delivery or crypto-to-NGN conversion; no automatic renewals. [Details](docs/subscriptions.md) |
+| Cross-chain pay-in | The cross-chain simulation exercises checkout and order processing without spending real funds. Live 1Click settlement uses mainnet and requires real assets; a funded live acceptance run has not been recorded here. [Details](docs/cross-chain.md) |
+
+Walletless card/bank checkout and a native Shopify payment app remain planned. Secondary integration credentials are unnecessary for the core native checkout.
 
 ## Repository structure
 
@@ -102,9 +134,9 @@ Fill in the settings in `backend/.env`:
 | `NEAR_TESTNET_SIGNER_SEED_BASE64` | Backend-only, base64-encoded 32-byte Ed25519 signing seed |
 | `NEAR_TESTNET_INDEXER_START_HEIGHT` | Router deployment height for indexing historical transactions; `0` starts near the current finalized tip |
 | `NEAR_TESTNET_FT_ALLOWLIST` | Token contracts enabled for checkout; align these with the router’s allowlist |
-| `VTPASS_API_KEY`, `VTPASS_PUBLIC_KEY`, `VTPASS_SECRET_KEY` | VTpass **sandbox** credentials; keep them in the backend environment only |
-| `VTPASS_DATA_ENCRYPTION_KEY_BASE64` | Separate random 32-byte key used to encrypt phone/meter/subscriber details at rest; generate with `openssl rand -base64 32` |
-| `ONECLICK_ENABLED`, `ONECLICK_MODE` | Cross-chain pay-in switch and mode; `mock` runs locally with fake money, `live` uses the 1Click API on mainnet (see [docs/cross-chain.md](docs/cross-chain.md)) |
+| Optional: `VTPASS_API_KEY`, `VTPASS_PUBLIC_KEY`, `VTPASS_SECRET_KEY` | VTpass **sandbox** credentials; keep them in the backend environment only |
+| Optional: `VTPASS_DATA_ENCRYPTION_KEY_BASE64` | Separate random 32-byte key used to encrypt phone/meter/subscriber details at rest; generate with `openssl rand -base64 32` |
+| Optional: `ONECLICK_ENABLED`, `ONECLICK_MODE` | Cross-chain pay-in switch and mode; `mock` runs a simulation without spending funds, `live` uses the 1Click API on mainnet (see [docs/cross-chain.md](docs/cross-chain.md)) |
 | `SESSION_COOKIE_SECURE` | Use `false` for local HTTP and `true` for deployed HTTPS |
 
 To initialize a local testnet signing seed, the helper below writes a seed only if one is not already configured and prints its public key:
@@ -115,7 +147,7 @@ cargo run -p worldz-near-api --bin generate_testnet_signer
 
 Register the matching **public key** on the router using its admin account. The API and router must agree on the signer key ID, public key, network, and contract account. Keep existing signing seeds stable across deployments.
 
-For the VTpass flow, register at the [VTpass sandbox](https://sandbox.vtpass.com/register), create its API keys under **Account Settings → API Keys**, and set the four `VTPASS_*` credentials/encryption values in `backend/.env`. Use sandbox keys only. Quotes fetch the latest daily-updated USD-base/NGN reference rate from [open.er-api.com](https://open.er-api.com/v6/latest/USD). Native NEAR quotes fetch a live NEAR/USD reference price from [CoinGecko](https://www.coingecko.com/en/coins/near), falling back to [CoinPaprika](https://coinpaprika.com/coin/near-near-protocol/) if CoinGecko is unavailable. Both prices are stored with the 10-minute quote; unavailable or stale pricing stops new quotes. USD stable test tokens use a 1:1 USD assumption, not an actual swap. The hackathon flow does not execute a crypto-to-fiat conversion. The service checkout is at `/dashboard/services` and requires a signed-in workspace and a NEAR testnet wallet.
+For the **optional VTpass sandbox flow** (skip this for native checkout), register at the [VTpass sandbox](https://sandbox.vtpass.com/register), create its API keys under **Account Settings → API Keys**, and set the four `VTPASS_*` credentials/encryption values in `backend/.env`. Use sandbox keys only. Quotes fetch the latest daily-updated USD-base/NGN reference rate from [open.er-api.com](https://open.er-api.com/v6/latest/USD). Native NEAR quotes fetch a live NEAR/USD reference price from [CoinGecko](https://www.coingecko.com/en/coins/near), falling back to [CoinPaprika](https://coinpaprika.com/coin/near-near-protocol/) if CoinGecko is unavailable. Both prices are stored with the 10-minute quote; unavailable or stale pricing stops new quotes. USD stable test tokens use a 1:1 USD assumption, not an actual swap. The hackathon flow does not execute a crypto-to-fiat conversion. The service checkout is at `/dashboard/services` and requires a signed-in workspace and a NEAR testnet wallet.
 
 Start the API from the repository root:
 
@@ -159,7 +191,7 @@ psql "$DATABASE_URL" -f scripts/seed-demo.sql
 # ONECLICK_MODE=mock
 ```
 
-Open `/pay/demo-cc`, choose **Pay with another chain**, connect Phantom or an EIP-6963 wallet, and press **Simulate deposit**. The backend worker settles the order through the same verified-receipt pipeline used by native payments. In `mock` mode no external API is called; set `ONECLICK_MODE=live` to route real mainnet swaps through 1Click.
+This is a **cross-chain sandbox demonstration** of checkout and order processing, requiring no real funds. Open `/pay/demo-cc`, choose **Pay with another chain**, connect Phantom or an EIP-6963 wallet, and press **Simulate deposit**. The backend worker settles the order through the same verified-receipt pipeline used by native payments. Mock deposits and settlement are simulated; pricing may still use the public 1Click token feed. Live operation uses `ONECLICK_MODE=live` with separately configured mainnet assets, recipients, RPC, and a funded acceptance run.
 
 ## Checks and contract builds
 
@@ -177,6 +209,7 @@ Run frontend checks:
 ```sh
 cd frontend
 npm run test
+npx next typegen
 npx tsc --noEmit
 npm run lint
 npm run build

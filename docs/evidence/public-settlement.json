@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "network": "testnet",
+  "verificationSource": "https://archival-rpc.testnet.fastnear.com",
+  "transactionHash": "9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN",
+  "transactionUrl": "https://testnet.nearblocks.io/txns/9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN",
+  "router": "router.newking.testnet",
+  "payer": "primexx.testnet",
+  "payoutAccountId": "luckytag417.testnet",
+  "feeRecipientAccountId": "newking.testnet",
+  "orderId": "ord_ea591c08e47340e59b3a6f6af4022dc3",
+  "merchantId": "mch_4917f5de961546c495ecd87ba381a124",
+  "orderKey": "48a9636ccd7694a2bb7eb37d700a259f6aa21e31c39fae6613ebe09bda1b54f2",
+  "amountYocto": "1500000000000000000000000",
+  "feeYocto": "4500000000000000000000",
+  "netYocto": "1495500000000000000000000",
+  "settlementReceiptId": "2Rj5TZibpcvyFxTnnUu4Ce4onC8TqZTGiqLEdWvBRRcj",
+  "settlementBlockHeight": 277584535,
+  "settledAtUtc": "2026-11-14T00:36:33+00:00",
+  "finalizedViewBlock": 277588991,
+  "routerState": "SETTLED",
+  "merchantLeg": "succeeded",
+  "feeLeg": "succeeded",
+  "finalExecutionStatus": "FINAL",
+  "browserEvidence": {
+    "status": "user-provided-dashboard-and-receipt-correlated",
+    "publicationStatus": "published-with-user-consent",
+    "screenshotSha256": "77b68889b90ced17a79552ddbf2edb6854a0135d2bf367ff75ad19e8411dd9e8",
+    "dimensions": {
+      "width": 1901,
+      "height": 923
+    },
+    "capturedAtUtc": null,
+    "matchedFields": [
+      "transactionHash",
+      "settlementReceiptId",
+      "amountYocto",
+      "feeYocto",
+      "netYocto",
+      "payer",
+      "payoutAccountId",
+      "network"
+    ],
+    "limitations": [
+      "Capture time and browser URL are not visible.",
+      "Order ID is not visible; correlation uses the exact transaction and settlement receipt mapped to that order on-chain.",
+      "Merchant session and hosted API response were not independently accessed.",
+      "Webhook delivery and original wallet interaction are not established."
+    ],
+    "screenshotPath": "screenshots/native-settlement-dashboard.png"
+  },
+  "browserScreenshotCorrelated": true,
+  "authenticatedApiIndependentlyVerified": false
+}

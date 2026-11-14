@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "environment": "disposable-postgres-with-fake-finalized-rpc",
+  "publicTestnetSettlementProof": false,
+  "generatedAtUtc": "2026-11-14T01:10:04.265371+00:00",
+  "baseCommit": "732bc4163f8cc1e831d105bfb765f9608133d0cc",
+  "sourceSha256": {
+    "backend/src/orders.rs": "f9850f1d3d11577c24cd4a3128742a57a035dc66886911c844babfd100e54c4d",
+    "backend/src/orders_db_tests.rs": "18c447274219361694c1bd18cb5acbb3162447273d6478a13fba24dd93ebfbde",
+    "scripts/check-recovery.sh": "5964f381141f44ae16b6642406a8c8d7d4746c84b64f9660a8a560630c1d785f"
+  },
+  "scenarios": [
+    {
+      "deadlinePreserved": true,
+      "financialTermsPreserved": true,
+      "originalAuthorizationPreserved": true,
+      "result": "passed",
+      "scenario": "unsubmitted"
+    },
+    {
+      "deadlinePreserved": true,
+      "financialTermsPreserved": true,
+      "originalAuthorizationPreserved": true,
+      "result": "passed",
+      "scenario": "processing"
+    },
+    {
+      "currentFeeRecipient": "rotated-fees.testnet",
+      "databaseStateAfterReconciliation": "SETTLED",
+      "databaseStateBeforeReconciliation": "OPEN",
+      "feeRecipientUsed": "fees.testnet",
+      "originalAuthorizationPreserved": true,
+      "redemptions": 1,
+      "result": "passed",
+      "routerState": "SETTLED",
+      "scenario": "paid",
+      "verifiedReceiptRecorded": true
+    },
+    {
+      "newReplayNonce": true,
+      "oldOrderState": "EXPIRED",
+      "replacementUsesCurrentTerms": true,
+      "result": "passed",
+      "scenario": "expired-unused"
+    }
+  ]
+}

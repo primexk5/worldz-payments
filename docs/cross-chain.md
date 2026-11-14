@@ -30,7 +30,7 @@ webhook pipeline as native payments.
    (`orders.settlement_receipt_id`). Failed swaps map to `REFUNDED` /
    `FAILED` / `INCOMPLETE_DEPOSIT` and never settle.
 
-## Real vs simulated
+## Sandbox simulation and live settlement
 
 | | `ONECLICK_MODE=mock` | `ONECLICK_MODE=live` |
 | --- | --- | --- |
@@ -38,6 +38,12 @@ webhook pipeline as native payments.
 | Quotes/deposits | Current USD prices from 1Click `/v0/tokens`; simulated deposits | Executable 1Click quotes (`/v0/quote`, `/v0/status`) |
 | Payment approval | "Confirm simulated payment" posts a synthetic hash; no wallet transaction | Connected wallet approves and sends the transfer automatically |
 | Settlement | Verified path with a synthetic NEAR hash | On-NEAR receipt verification via NEAR RPC |
+
+Sandbox simulation is valid evidence for the behaviors it exercises. Live
+1Click transfers use mainnet assets and require real funds; no funded live
+cross-chain acceptance transaction is recorded in the current evidence package.
+Mainnet configuration/deployment and a funded acceptance run remain separate
+release steps, rather than prerequisites for testing the sandbox flow.
 
 The mock mode exists so the full UI, attempt lifecycle, deadline expiry,
 and settle-once guarantees can be exercised locally without keys. Simulated

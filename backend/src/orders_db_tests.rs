@@ -147,6 +147,10 @@ async fn fee_rotation_preserves_delayed_settlement_and_only_replaces_expired_uns
                 original.authorization["nonce"],
                 reclaimed.authorization["nonce"]
             );
+            eprintln!(
+                "RECOVERY_EVIDENCE:{}",
+                json!({"scenario":slug,"result":"passed","oldOrderState":"EXPIRED","replacementUsesCurrentTerms":true,"newReplayNonce":true})
+            );
             continue;
         }
         assert_eq!(original.order_id, reclaimed.order_id);
@@ -168,6 +172,10 @@ async fn fee_rotation_preserves_delayed_settlement_and_only_replaces_expired_uns
         assert_eq!(after.get::<String, _>("customer_name"), "Buyer");
         assert_ne!(original.edit_token, reclaimed.edit_token);
         if on_chain["state"] != "SETTLED" {
+            eprintln!(
+                "RECOVERY_EVIDENCE:{}",
+                json!({"scenario":slug,"result":"passed","originalAuthorizationPreserved":true,"financialTermsPreserved":true,"deadlinePreserved":true})
+            );
             continue;
         }
 
@@ -210,6 +218,10 @@ async fn fee_rotation_preserves_delayed_settlement_and_only_replaces_expired_uns
             .await
             .unwrap();
         assert_eq!(claims, 1);
+        eprintln!(
+            "RECOVERY_EVIDENCE:{}",
+            json!({"scenario":slug,"result":"passed","databaseStateBeforeReconciliation":"OPEN","routerState":"SETTLED","originalAuthorizationPreserved":true,"feeRecipientUsed":"fees.testnet","currentFeeRecipient":"rotated-fees.testnet","databaseStateAfterReconciliation":"SETTLED","verifiedReceiptRecorded":true,"redemptions":claims})
+        );
     }
     server.abort();
     pool.close().await;
