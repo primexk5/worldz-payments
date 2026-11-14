@@ -35,7 +35,12 @@ In Render, create or sync a Blueprint from this repository and review `render.ya
 | `NEAR_TESTNET_SIGNER_SEED_BASE64` | Backend-only 32-byte signing seed, standard Base64 |
 | `NEAR_TESTNET_INDEXER_START_HEIGHT` | Router deployment block height, or `0` to start at the current finalized tip |
 | `NEAR_TESTNET_FT_ALLOWLIST` | Comma-separated Testnet FT contract IDs enabled in the router |
-| `WEBHOOK_SIGNING_SECRET` | Optional; omit unless merchant webhook signing is configured |
+| `WEBHOOK_SIGNING_SECRET` | Required for merchant webhooks; the Blueprint generates a strong value when one does not already exist |
+
+If the optional Vercel sample receiver at `/webhooks/worldz` is used, copy the
+Render service's `WEBHOOK_SIGNING_SECRET` into the Vercel project's server-side
+environment variables with the same name, then redeploy the frontend. Both sides
+must use the same secret. Do not expose it through a `NEXT_PUBLIC_` variable.
 
 The Blueprint sets `APP_HOST=0.0.0.0`, `APP_PORT=10000`, and `SESSION_COOKIE_SECURE=true` for Render.
 

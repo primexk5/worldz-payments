@@ -31,4 +31,4 @@ services:
       - key: NEAR_TESTNET_FT_ALLOWLIST
         sync: false
       - key: WEBHOOK_SIGNING_SECRET
-        sync: false
+        generateValue: true
