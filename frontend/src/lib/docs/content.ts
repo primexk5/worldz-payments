@@ -204,6 +204,7 @@ if (response.status === 401) {
 if (!response.ok) throw new Error("Could not load merchant profile");
 const merchant = await response.json();` },
       { type: "callout", title: "API keys in this release", text: "Settings supports issuing and revoking keys, and displays each secret once. Merchant routes accept a wallet-authenticated session or Authorization: Bearer wzp_... using an active key. Keys inherit merchant access; keep them on your server. Payout changes still require a fresh wallet proof. Customer order access uses the private checkout token returned after wallet verification." },
+      { type: "paragraph", text: "Find your merchant ID in Dashboard → Settings → Merchant profile and select Copy ID. This unique workspace ID is used when configuring API and webhook integrations." },
     ],
   },
   {

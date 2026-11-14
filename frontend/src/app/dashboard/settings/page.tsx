@@ -27,6 +27,9 @@ export default function SettingsPage() {
   const [keyBusy,setKeyBusy]=useState(false);
   const [shopDomain,setShopDomain]=useState("");
   const [shopifyShops,setShopifyShops]=useState<{shopDomain:string;scopes:string;installedAtMs:number}[]>([]);
+  const [merchantIdCopied,setMerchantIdCopied]=useState(false);
+
+  useEffect(()=>{if(!merchantIdCopied)return;const timeout=window.setTimeout(()=>setMerchantIdCopied(false),2000);return()=>window.clearTimeout(timeout);},[merchantIdCopied]);
 
   const reload=async()=>{const [me,keyList,shopify]=await Promise.all([nearApi.me(),nearApi.apiKeys(),nearApi.shopifyConnection()]);setProfile(me);setDisplayName(me.displayName);setPayoutAccountId(me.payoutAccountId);setWebhookUrl(me.webhookUrl??"");setKeys(keyList.keys);setShopifyShops(shopify.shops);};
   useEffect(()=>{let active=true;void Promise.all([nearApi.me(),nearApi.apiKeys(),nearApi.shopifyConnection()]).then(([me,keyList,shopify])=>{if(!active)return;setProfile(me);setDisplayName(me.displayName);setPayoutAccountId(me.payoutAccountId);setWebhookUrl(me.webhookUrl??"");setKeys(keyList.keys);setShopifyShops(shopify.shops);}).catch((cause)=>{if(active)setError(cause instanceof Error?cause.message:"Could not load settings.");}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[]);
@@ -36,6 +39,7 @@ export default function SettingsPage() {
   const createKey=async()=>{if(!keyLabel.trim())return setError("Give the API key a label.");setKeyBusy(true);setError(null);try{const created=await nearApi.createApiKey(keyLabel.trim());setNewKey(created);setKeyLabel("");await reload();}catch(cause){setError(cause instanceof Error?cause.message:"Could not create API key.");}finally{setKeyBusy(false);}};
   const revoke=async(keyRef:string)=>{setKeyBusy(true);setError(null);try{await nearApi.revokeApiKey(keyRef);setKeys((current)=>current.filter((key)=>key.keyRef!==keyRef));}catch(cause){setError(cause instanceof Error?cause.message:"Could not revoke API key.");}finally{setKeyBusy(false);}};
   const copyKey=async()=>{if(!newKey)return;try{await navigator.clipboard.writeText(newKey.secret);}catch{setError("Clipboard permission was denied.");}};
+  const copyMerchantId=async()=>{if(!profile?.merchantId)return;try{await navigator.clipboard.writeText(profile.merchantId);setMerchantIdCopied(true);}catch{setError("Could not copy the merchant ID. Select and copy it from the field below.");}};
 
   const inputClass = "mt-2 h-12 min-h-12 w-full min-w-0 shrink-0 rounded-xl border border-line bg-white px-4 text-base outline-none transition-colors placeholder:text-ink/35 focus:border-ink/30 sm:text-sm";
   const actionClass = "inline-flex min-h-12 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-vault px-5 text-sm font-medium text-white transition-colors hover:bg-ink disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto";
@@ -61,6 +65,16 @@ export default function SettingsPage() {
         <div className="flex items-start gap-3 border-b border-line/65 p-5 sm:p-6"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-green-deep/10 text-vault"><ShieldCheck size={20}/></span><div><h2 className="text-base font-semibold tracking-tight">Merchant profile</h2><p className="mt-1 text-xs leading-6 text-ink/50">The details customers see at checkout and on receipts.</p></div></div>
         <div className="space-y-6 p-5 sm:p-6">
           <div className="rounded-2xl border border-line bg-paper/35 p-4"><div className="flex items-center justify-between gap-3"><span className="text-xs text-ink/50">Login account</span><span className="inline-flex items-center gap-1 text-[10px] font-medium text-vault"><ShieldCheck size={12}/>Verified</span></div><p className="mt-3 break-all font-mono text-sm leading-6">{profile?.accountId}</p></div>
+          <div>
+            <label htmlFor="merchant-id" className="text-xs font-medium">Merchant ID</label>
+            <div className="mt-2 flex min-w-0 flex-col gap-3 sm:flex-row">
+              <input id="merchant-id" readOnly value={profile?.merchantId ?? ""} aria-describedby="merchant-id-description" spellCheck={false} className={`${inputClass} !mt-0 font-mono sm:flex-1`}/>
+              <button type="button" onClick={()=>void copyMerchantId()} disabled={!profile?.merchantId} className={actionClass} aria-label="Copy merchant ID">
+                {merchantIdCopied ? <Check size={16}/> : <Copy size={16}/>}<span role="status">{merchantIdCopied ? "Copied" : "Copy ID"}</span>
+              </button>
+            </div>
+            <p id="merchant-id-description" className="mt-2 text-xs leading-6 text-ink/50">Your unique workspace ID. Use it when setting up API and webhook integrations.</p>
+          </div>
           <form onSubmit={event => { event.preventDefault(); void save(); }} className="space-y-5">
             <div><label htmlFor="business-name" className="text-xs font-medium">Business name</label><input id="business-name" value={displayName} onChange={event => setDisplayName(event.target.value)} autoComplete="organization" className={inputClass}/></div>
             <div><label htmlFor="webhook-url" className="text-xs font-medium">Webhook URL <span className="font-normal text-ink/40">Optional</span></label><input id="webhook-url" inputMode="url" type="url" value={webhookUrl} onChange={event => setWebhookUrl(event.target.value)} autoCapitalize="none" spellCheck={false} placeholder="https://shop.example/webhooks/worldz" className={inputClass}/><p className="mt-2 text-xs leading-6 text-ink/50">Receive payment updates at your server’s webhook endpoint.</p></div>
