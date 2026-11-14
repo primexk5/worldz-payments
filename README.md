@@ -6,11 +6,11 @@ For independent merchants accepting NEAR wallet payments, a transaction hash is 
 WorldzPayments connects a payment link to an authorized order, verifies the required merchant and fee payouts, and produces a receipt and reconciliation record.
 The prototype supports native NEAR and configured NEP-141 tokens on **NEAR testnet**.
 
-[Live testnet app](https://worldz-payments.vercel.app) · [Watch the 60-second product video](https://worldz-payments.vercel.app/checkout/demo) · [Verified testnet payment](https://testnet.nearblocks.io/txns/9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN) · [Evidence and verification](docs/evidence/README.md) · [Product docs](https://worldz-payments.vercel.app/docs)
+[Live testnet app](https://worldz-payments.vercel.app) · [Watch the 60-second product video](https://worldz-payments.vercel.app/checkout/demo) · [Verified storefront payment](https://testnet.nearblocks.io/txns/CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE) · [Evidence and verification](docs/evidence/README.md) · [Product docs](https://worldz-payments.vercel.app/docs)
 
-[![Merchant dashboard and receipt for the verified 1.5 NEAR testnet payment](docs/evidence/screenshots/native-settlement-dashboard.png)](https://testnet.nearblocks.io/txns/9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN)
+[![Merchant dashboard and receipt for the verified 0.03 NEAR storefront payment](docs/evidence/screenshots/storefront-settlement-dashboard.png)](https://testnet.nearblocks.io/txns/CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE)
 
-*Merchant-provided dashboard screenshot: 1.5 NEAR settled, 1.4955 NEAR to the merchant, and 0.0045 NEAR in fees. The displayed transaction and settlement reference match finalized public chain data. Published unchanged with permission.*
+*Merchant-provided receipt for the storefront test: 0.03 testnet NEAR settled, 0.02991 NEAR to the merchant, and 0.00009 NEAR in fees. The exact payment matches the authenticated merchant API and finalized router state. Screenshot published unchanged at the user's request; webhook delivery has a separate status below.*
 
 ## Why use it?
 
@@ -28,10 +28,39 @@ WorldzPayments is submitted to the **NEAR Hackathon Real-World Money** track.
 | Product video | A walkthrough of the intended experience | [Watch](https://worldz-payments.vercel.app/checkout/demo) |
 | Native and token sandbox tests | Actual local blockchain payout receipts, replay rejection, and upgrade compatibility | [Tests](contracts/router/tests/sandbox.rs) |
 | Fee-rotation recovery regression | An already-paid order still reconciles against its original terms after configuration changes | [Run and inspect the report](docs/evidence/README.md#reproduce-the-recovery-case) |
+| Storefront product checkout | User-identified product-page initiation; the 0.03 NEAR payment matches the supplied receipt, authenticated merchant API, finalized settlement event and router state | [Storefront evidence](docs/evidence/README.md#storefront-product-checkout) · [Exact record](docs/evidence/storefront-payment.json) |
+| Storefront webhook observation | The user reported working webhooks; the final sender observation at 09:12:39 UTC on 14 November 2026 was failed after 10 attempts, with HTTP 404 from the receiver. Receiver acceptance/signature evidence was not captured | [Delivery observation and limits](docs/evidence/README.md#storefront-webhook-status) |
 | Public on-chain settlement | A 1.5 testnet NEAR payment has matching finalized settlement evidence and succeeded payout legs | [Transaction](https://testnet.nearblocks.io/txns/9Wufap1bjNXDjMjbikHBT6Uj9gNxARJitoobxjW8mwfN) · [Exact identifiers](docs/evidence/public-settlement.json) |
-| Dashboard/receipt correlation | The published merchant dashboard and receipt match the verified public transaction, settlement reference, and amounts. Webhook delivery is not included in this evidence | [Evidence status](docs/evidence/README.md#public-testnet-checkout) |
+| Earlier 1.5 NEAR dashboard/receipt | The earlier published merchant dashboard and receipt match that verified public transaction, settlement reference, and amounts. Webhook delivery is not included in that evidence | [Evidence status](docs/evidence/README.md#public-testnet-checkout) |
 
 The earlier manual run does not validate a later deployment. Public evidence must be refreshed after upgrading the router or changing the signer, fee configuration, indexer, backend, or checkout.
+
+### Storefront acceptance run
+
+On **14 November 2026**, the merchant tested the **Pay with NEAR** button for
+**1 × SecureKey Hardware Wallet** from the
+[standalone example storefront](https://github.com/primexk5/Shopify). The supplied
+product-page and receipt screenshots identify the flow. Read-only merchant API
+and public RPC checks independently matched the resulting payment:
+
+| Field | Observed value |
+| --- | --- |
+| Network / settled receipt block time | NEAR testnet / 14 November 2026, 08:53:16 UTC |
+| Gross / fee / merchant net | 0.03 / 0.00009 / 0.02991 NEAR |
+| Merchant payout | `luckytag417.testnet` |
+| Order | `ord_e46c0409e04e4f52ae295e988dbd4d28` |
+| Public transaction | [CvsZPAg47…](https://testnet.nearblocks.io/txns/CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE) |
+| Settlement / router result | `SETTLED`; merchant and fee legs `succeeded` |
+| Webhook | Sender status `failed`, 10 attempts, receiver HTTP 404; receiver acceptance/signature evidence not captured |
+
+![User-identified storefront with product Pay with NEAR buttons](docs/evidence/screenshots/storefront-product-page.png)
+
+The repository is named Shopify, but this acceptance run covers a standalone
+storefront handing off to hosted WorldzPayments checkout. It does not establish
+native Shopify order synchronization or goods fulfilment. This is a testnet
+payment, not a mainnet or real-money acceptance run. The
+[redacted evidence record](docs/evidence/storefront-payment.json) includes exact
+event/settlement IDs, source revisions inspected, RPC queries and screenshot hashes.
 
 ### Try the native testnet flow
 
@@ -138,6 +167,7 @@ Fill in the settings in `backend/.env`:
 | Optional: `VTPASS_DATA_ENCRYPTION_KEY_BASE64` | Separate random 32-byte key used to encrypt phone/meter/subscriber details at rest; generate with `openssl rand -base64 32` |
 | Optional: `ONECLICK_ENABLED`, `ONECLICK_MODE` | Cross-chain pay-in switch and mode; `mock` runs a simulation without spending funds, `live` uses the 1Click API on mainnet (see [docs/cross-chain.md](docs/cross-chain.md)) |
 | `SESSION_COOKIE_SECURE` | Use `false` for local HTTP and `true` for deployed HTTPS |
+| Optional: `WEBHOOK_SIGNING_SECRET` | Sending backend's HMAC secret; provide the identical value to each receiving integration through a secure channel |
 
 To initialize a local testnet signing seed, the helper below writes a seed only if one is not already configured and prints its public key:
 
@@ -174,13 +204,55 @@ Open **http://localhost:3000**. Browser API requests use `/api/v1/*`; the Next.j
 
 Real `.env` files, database passwords, signing seeds, wallet keys, and webhook secrets must remain outside Git. Only `NEXT_PUBLIC_*` values are intended to be included in the browser bundle.
 
-### 3. Optional Shopify setup
+### 3. External storefront developer configuration
+
+To connect an existing website's product button, follow the
+[developer configuration guide](docs/storefront-integration.md) or
+[website docs](https://worldz-payments.vercel.app/docs#storefront-configuration).
+The [example storefront source](https://github.com/primexk5/Shopify) shows the
+server-side link creation and receiving route.
+
+Configure these **in the external storefront's server environment**, using
+`.env.local` for the Next.js example and hosting environment variables for a
+deployment:
+
+```dotenv
+WORLDZ_API_BASE=https://worldz-payments.vercel.app/api/v1
+WORLDZ_CHECKOUT_ORIGIN=https://worldz-payments.vercel.app
+WORLDZ_API_KEY=YOUR_MERCHANT_API_KEY
+WORLDZ_MERCHANT_ID=mch_YOUR_WORKSPACE_ID
+WORLDZ_PAYOUT_ACCOUNT_ID=YOUR_PAYOUT_ACCOUNT.testnet
+WORLDZ_WEBHOOK_SIGNING_SECRET=YOUR_BACKEND_WEBHOOK_SIGNING_SECRET
+WORLDZ_EVIDENCE_DIR=
+```
+
+Find Merchant ID with **Settings → Merchant profile → Copy ID**, the payout
+account under **Payout destination**, and the API key under **API keys**. Obtain
+the existing backend's `WEBHOOK_SIGNING_SECRET` from its operator; the receiving
+secret must match it exactly. Keep credentials server-side and out of Git.
+
+Save `https://YOUR_STOREFRONT_HOST/api/webhooks/worldz` in the WorldzPayments
+merchant's **Webhook URL** field before starting a new checkout. The example
+receiver defaults to a local `.worldz-evidence` directory; Vercel and multiple
+instances require shared durable event storage. A filesystem path alone does
+not provide durable serverless deduplication. Verify settlement and webhook
+delivery independently; the API base, hosted checkout origin and receiving URL
+have different purposes.
+
+For the separate signature-verification demo built into the WorldzPayments
+website, configure **`WEBHOOK_SIGNING_SECRET` on that frontend** to match the
+backend, redeploy, and use `https://YOUR_WORLDZ_FRONTEND_HOST/webhooks/worldz`.
+That sample logs a verified event and returns 204; it has no durable event
+storage, deduplication or fulfilment. The external storefront receiver instead
+uses `WORLDZ_WEBHOOK_SIGNING_SECRET` and `/api/webhooks/worldz`.
+
+### 4. Optional Shopify setup
 
 Configure the `SHOPIFY_*` settings described in [`backend/.env.example`](backend/.env.example), use [`shopify/shopify.app.toml.example`](shopify/shopify.app.toml.example) as the app configuration reference, and connect a development store before testing checkout.
 
 Product variants need the `worldz.payment` JSON metafield used by the integration. Checkout validates the selected asset and token metadata, calculates the total for the requested quantity, and requires buyer details before payment authorization. A completed NEAR payment is synchronized to Shopify only after verified settlement.
 
-### 4. Optional cross-chain pay-in demo
+### 5. Optional cross-chain pay-in demo
 
 Seed the demo merchant and cross-chain-enabled payment links, then enable mock mode:
 
@@ -276,6 +348,7 @@ Source changes in this repository do not automatically prove that a deployed con
 ## Documentation
 
 - [Product guide and API examples](frontend/public/docs/worldzpayments-guide.md)
+- [Developer storefront and webhook configuration](docs/storefront-integration.md)
 - [Backend setup and settlement model](backend/README.md)
 - [Render and Supabase deployment](docs/render-supabase.md)
 - [Signed-order protocol](docs/near-signed-order-v1.md)

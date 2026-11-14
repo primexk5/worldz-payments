@@ -42,6 +42,14 @@ Render service's `WEBHOOK_SIGNING_SECRET` into the Vercel project's server-side
 environment variables with the same name, then redeploy the frontend. Both sides
 must use the same secret. Do not expose it through a `NEXT_PUBLIC_` variable.
 
+This website sample verifies the HMAC/basic envelope, logs the event ID and
+returns 204; it does not persist events, deduplicate them or fulfil orders.
+The separate example storefront uses `WORLDZ_WEBHOOK_SIGNING_SECRET` and
+`/api/webhooks/worldz`, with local evidence storage. Use the hostname and route
+for the receiver actually deployed. See the
+[developer storefront configuration guide](storefront-integration.md) for the
+environment mapping and persistent-storage requirements.
+
 The Blueprint sets `APP_HOST=0.0.0.0`, `APP_PORT=10000`, and `SESSION_COOKIE_SECURE=true` for Render.
 
 ## Vercel frontend environment

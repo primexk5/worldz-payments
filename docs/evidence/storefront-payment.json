@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "network": "testnet",
+  "flow": "Standalone storefront product button → WorldzPayments hosted native NEAR checkout",
+  "product": "1 × SecureKey Hardware Wallet",
+  "storefront": {
+    "repository": "https://github.com/primexk5/Shopify",
+    "sourceCommit": "f9a356424f72232e7d011cb10c1b9e7aa1a90e4d",
+    "userIdentifiedUrl": "https://frontend-roan-seven-b3zytmv7iu.vercel.app",
+    "deployedRevisionIndependentlyVerified": false,
+    "nativeShopifyOrderSynchronizationTested": false
+  },
+  "localWorldzSourceCommit": "2064d327bb5530b66abb1ea0ffe87afaf790f04f",
+  "transactionHash": "CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE",
+  "transactionUrl": "https://testnet.nearblocks.io/txns/CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE",
+  "router": "router.newking.testnet",
+  "orderId": "ord_e46c0409e04e4f52ae295e988dbd4d28",
+  "merchantId": "mch_4917f5de961546c495ecd87ba381a124",
+  "payerAccountId": "drytea4617.testnet",
+  "payoutAccountId": "luckytag417.testnet",
+  "asset": {
+    "decimals": 24,
+    "symbol": "NEAR",
+    "type": "native"
+  },
+  "amountYocto": "30000000000000000000000",
+  "feeYocto": "90000000000000000000",
+  "netYocto": "29910000000000000000000",
+  "settlementReceiptId": "5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo",
+  "eventId": "testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1",
+  "chainVerification": {
+    "verifiedAtUtc": "2026-11-14T09:02:24.089971+00:00",
+    "verificationSource": "https://archival-rpc.testnet.fastnear.com",
+    "orderKey": "ed13b41a1cdb1e1f497713dd85f923d751ebac2ed5a32bae19f0a80ecc8915fa",
+    "finalExecutionStatus": "FINAL",
+    "routerState": "SETTLED",
+    "merchantLeg": {
+      "recipientAccountId": "luckytag417.testnet",
+      "amount": "29910000000000000000000",
+      "state": "succeeded",
+      "attemptId": 23
+    },
+    "feeLeg": {
+      "recipientAccountId": "newking.testnet",
+      "amount": "90000000000000000000",
+      "state": "succeeded",
+      "attemptId": 24
+    },
+    "settlementReceiptId": "5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo",
+    "settlementBlockHeight": 277634878,
+    "settledAtUtc": "2026-11-14T08:53:16.623902+00:00",
+    "finalizedViewBlock": 277635774,
+    "transactionQuery": {
+      "method": "tx",
+      "params": {
+        "tx_hash": "CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE",
+        "sender_account_id": "drytea4617.testnet",
+        "wait_until": "FINAL"
+      }
+    },
+    "orderQuery": {
+      "method": "query",
+      "params": {
+        "request_type": "call_function",
+        "finality": "final",
+        "account_id": "router.newking.testnet",
+        "method_name": "get_order",
+        "args_base64": "eyJvcmRlcl9rZXkiOiAiZWQxM2I0MWExY2RiMWUxZjQ5NzcxM2RkODVmOTIzZDc1MWViYWMyZWQ1YTMyYmFlMTlmMGE4MGVjYzg5MTVmYSJ9"
+      }
+    },
+    "matchedFields": [
+      "orderId",
+      "merchantId",
+      "payoutAccountId",
+      "payerAccountId",
+      "networkId",
+      "contractId",
+      "amount",
+      "fee",
+      "net",
+      "state"
+    ]
+  },
+  "merchantApi": {
+    "source": "Authenticated GET https://worldz-payments.vercel.app/api/v1/me/deliveries",
+    "observedAtUtc": "2026-11-14T08:59:40.724673+00:00",
+    "authenticatedReadVerified": true,
+    "state": "SETTLED",
+    "timestampMs": 1794646401620,
+    "amount": "30000000000000000000000",
+    "fee": "90000000000000000000",
+    "net": "29910000000000000000000",
+    "latestObservedAtUtc": "2026-11-14T09:12:39.455992+00:00"
+  },
+  "webhook": {
+    "userReportedWorking": true,
+    "userReport": "webhook payments works",
+    "senderObservation": {
+      "eventId": "testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1",
+      "state": "failed",
+      "attempts": 10,
+      "updatedAtMs": 1794647440106,
+      "lastErrorSummary": "Receiver returned HTTP 404",
+      "observedAtUtc": "2026-11-14T09:12:39.455992+00:00"
+    },
+    "receiverEvidenceCaptured": false,
+    "signatureIndependentlyVerified": false,
+    "deliveryIndependentlyVerified": false,
+    "senderObservations": [
+      {
+        "eventId": "testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1",
+        "state": "pending",
+        "attempts": 8,
+        "updatedAtMs": 1794646669189,
+        "observedAtUtc": "2026-11-14T08:59:40.724673+00:00"
+      },
+      {
+        "eventId": "testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1",
+        "state": "failed",
+        "attempts": 10,
+        "updatedAtMs": 1794647440106,
+        "lastErrorSummary": "Receiver returned HTTP 404",
+        "observedAtUtc": "2026-11-14T09:12:39.455992+00:00"
+      }
+    ]
+  },
+  "screenshots": [
+    {
+      "path": "screenshots/storefront-settlement-dashboard.png",
+      "sha256": "c99a3d1817275810be20e17aae419f4d88b389936de2174e846a9c02a9241e60",
+      "width": 1901,
+      "height": 923,
+      "scope": "Merchant dashboard and receipt",
+      "source": "User-provided screenshot; publication requested by user",
+      "capturedAtUtc": null,
+      "modified": false
+    },
+    {
+      "path": "screenshots/storefront-product-page.png",
+      "sha256": "c7a6c712a2b2f7f7500f74992c79ead8ea5c1251152433bc478f21a4dda039b4",
+      "width": 1920,
+      "height": 1080,
+      "scope": "User-identified initiating storefront",
+      "source": "User-provided screenshot; publication requested by user",
+      "capturedAtUtc": null,
+      "modified": false
+    }
+  ],
+  "limitations": [
+    "User supplied the screenshots and identified the initiating storefront; the browser session was not independently controlled.",
+    "Screenshot capture UTC timestamps are unknown; the receipt displays the payment timestamp.",
+    "The configured public RPC is trusted; this is not a light-client proof or verification of deployed bytecode.",
+    "Local source revisions were recorded; deployed frontend/backend revisions and router code hash were not independently verified.",
+    "The user reported working webhooks; the latest captured sender result is failed after 10 attempts, with Receiver returned HTTP 404. No receiver-side accepted or signature-verification record was supplied.",
+    "No native Shopify order synchronization, goods fulfilment, actual sender retry success, or live duplicate/tamper acceptance test is established by this record."
+  ]
+}

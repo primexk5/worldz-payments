@@ -191,9 +191,66 @@ console.log(paymentUrl.toString());` },
     ],
   },
   {
-    id: "authentication", group: "Build an integration", title: "API authentication", description: "Use the current wallet-authenticated session contract.", keywords: "API key auth cookie session NEP413 bearer challenge nonce proof login secret",
+    id: "storefront-configuration", group: "Build an integration", title: "Developer storefront configuration", description: "Connect a product button, hosted NEAR checkout and a signed webhook receiver.", keywords: "developer configuration environment env local example WORLDZ_API_BASE WORLDZ_CHECKOUT_ORIGIN WORLDZ_API_KEY WORLDZ_MERCHANT_ID WORLDZ_PAYOUT_ACCOUNT_ID WORLDZ_WEBHOOK_SIGNING_SECRET WORLDZ_EVIDENCE_DIR Shopify Vercel storefront product button",
     blocks: [
-      { type: "paragraph", text: "Merchant API endpoints currently authenticate using the HTTP session cookie created by wallet sign-in. Browser requests to this site use credentials: include. Connecting a wallet by itself does not authenticate those requests." },
+      { type: "paragraph", text: "For an external website, create payment links on your server and send the customer to WorldzPayments hosted checkout. The example storefront uses native NEAR on testnet. Its repository is named Shopify, but it is a standalone shop; the Shopify theme app block and paid-order synchronization have their own setup." },
+      { type: "steps", items: [
+        { title: "Copy your merchant configuration", text: "In Dashboard → Settings → Merchant profile, select Copy ID beside Merchant ID. Copy the exact saved payout account. In API keys, create a storefront key and save its secret when shown. The merchant ID is a unique workspace identifier; the business name is the label customers see." },
+        { title: "Obtain the webhook signing secret", text: "Ask the backend deployment operator for the current WEBHOOK_SIGNING_SECRET through a secure channel. Set that identical value as WORLDZ_WEBHOOK_SIGNING_SECRET on the receiver. This prototype uses a deployment-wide signing secret; Settings does not issue a separate per-merchant webhook secret. Your merchant API key authorizes API calls and cannot verify webhook signatures." },
+        { title: "Configure the server environment", text: "For the example Next.js storefront, copy frontend/.env.example to frontend/.env.local and fill in real values there. The template is not loaded by Next.js. Set the same variables in your hosting environment and redeploy; .env.local is kept out of Git. Keep credentials server-side and out of NEXT_PUBLIC_* variables." },
+      ] },
+      { type: "code", title: "Example storefront · frontend/.env.local", language: "dotenv", code: `WORLDZ_API_BASE=https://worldz-payments.vercel.app/api/v1
+WORLDZ_CHECKOUT_ORIGIN=https://worldz-payments.vercel.app
+WORLDZ_API_KEY=YOUR_MERCHANT_API_KEY
+WORLDZ_MERCHANT_ID=mch_YOUR_WORKSPACE_ID
+WORLDZ_PAYOUT_ACCOUNT_ID=YOUR_PAYOUT_ACCOUNT.testnet
+WORLDZ_WEBHOOK_SIGNING_SECRET=YOUR_BACKEND_WEBHOOK_SIGNING_SECRET
+WORLDZ_EVIDENCE_DIR=` },
+      { type: "table", headers: ["Variable", "Expected value"], rows: [
+        ["WORLDZ_API_BASE", "WorldzPayments frontend origin plus /api/v1; a direct backend connection uses its origin plus /v1."],
+        ["WORLDZ_CHECKOUT_ORIGIN", "WorldzPayments frontend origin only. Leave off API, payment and webhook paths."],
+        ["WORLDZ_API_KEY", "Active merchant key from Settings → API keys. Send it only from your server as Authorization: Bearer …"],
+        ["WORLDZ_MERCHANT_ID", "Settings → Merchant profile → Merchant ID → Copy ID."],
+        ["WORLDZ_PAYOUT_ACCOUNT_ID", "Exact registered payout account. The receiver checks this against payment data."],
+        ["WORLDZ_WEBHOOK_SIGNING_SECRET", "Exact WEBHOOK_SIGNING_SECRET of the sending backend deployment, provided by its operator."],
+        ["WORLDZ_EVIDENCE_DIR", "Optional local receiver directory. Blank defaults to .worldz-evidence inside the storefront frontend working directory."],
+      ] },
+      { type: "paragraph", text: "These variables belong to the external example storefront. The WorldzPayments app itself uses its own frontend/backend configuration. For an existing backend, reuse its current signing secret at the receiver; generating a new receiver-only secret breaks signature verification." },
+      { type: "code", title: "Verify server credentials and workspace", language: "JavaScript", code: `// Server-side check; do not send the merchant key to browser code.
+const response = await fetch(process.env.WORLDZ_API_BASE + "/me", {
+  headers: { Authorization: "Bearer " + process.env.WORLDZ_API_KEY },
+  redirect: "error",
+});
+if (!response.ok) throw new Error("Merchant API configuration failed");
+const merchant = await response.json();
+if (merchant.merchantId !== process.env.WORLDZ_MERCHANT_ID ||
+    merchant.payoutAccountId !== process.env.WORLDZ_PAYOUT_ACCOUNT_ID) {
+  throw new Error("Merchant ID or expected payout account does not match");
+}` },
+      { type: "steps", items: [
+        { title: "Create the checkout link", text: "The example product button posts productId and quantity to /api/register-order on the storefront. Its server calculates the amount from its catalog and calls POST /links with the merchant API key. Use integer base units: 0.03 NEAR is 30000000000000000000000 yoctoNEAR. Validate returned merchant, payout, network, asset and amount, then navigate to WORLDZ_CHECKOUT_ORIGIN + /pay/ + the returned slug. Hosted checkout handles the payer wallet and order claim." },
+        { title: "Save the receiving URL", text: "In WorldzPayments Settings → Webhook URL, save https://YOUR_STOREFRONT_HOST/api/webhooks/worldz. The example includes /api. Use the receiver host, with public HTTPS/DNS and no interactive login or redirects. Save it before creating the payment. For local tests, expose the running storefront through an HTTPS tunnel and use its hostname plus this path." },
+        { title: "Confirm settlement and delivery separately", text: "After one small native testnet payment, match the receipt, order, transaction and settlement reference. Check GET /api/v1/me/deliveries for that event's webhook state delivered, and match it with the receiver's accepted, signature-verified record. A settled payment can have a pending or failed webhook; investigate the delivery without paying again." },
+      ] },
+      { type: "table", headers: ["Receiver", "Server environment / callback"], rows: [
+        ["External example storefront", "Set WORLDZ_WEBHOOK_SIGNING_SECRET on the storefront. Callback: https://YOUR_STOREFRONT_HOST/api/webhooks/worldz."],
+        ["WorldzPayments website sample", "Set WEBHOOK_SIGNING_SECRET on the WorldzPayments frontend to the backend's identical value (32+ characters) and redeploy. Callback: https://YOUR_WORLDZ_FRONTEND_HOST/webhooks/worldz."],
+      ] },
+      { type: "paragraph", text: "The optional website receiver at /webhooks/worldz verifies the HMAC and basic event envelope, logs the event ID and returns 204. It has no durable storage, duplicate suppression, merchant/order binding or goods fulfilment. It is a signature-verification demo. Use the callback hostname/path and environment variable for the receiver you actually deployed; WORLDZ_EVIDENCE_DIR applies only to the external storefront receiver." },
+      { type: "callout", title: "Persistent receiver storage", text: "The example receiver records events on a single persistent local disk and performs no goods fulfilment. WORLDZ_EVIDENCE_DIR is optional; it does not make Vercel or another ephemeral filesystem durable. For serverless or multiple instances, use shared durable persistence with a unique event-ID constraint before returning 2xx or performing business actions. Keep raw evidence private." },
+      { type: "links", items: [
+        { label: "Example storefront source", href: "https://github.com/primexk5/Shopify" },
+        { label: "Complete configuration guide", href: "https://github.com/primexk5/worldz-payments/blob/main/docs/storefront-integration.md" },
+        { label: "Payment link request", href: "#create-link-api" },
+        { label: "Webhook verification", href: "#webhooks" },
+        { label: "Shopify app setup", href: "#shopify" },
+      ] },
+    ],
+  },
+  {
+    id: "authentication", group: "Build an integration", title: "API authentication", description: "Use a merchant session or a server-side API key.", keywords: "API key auth cookie session NEP413 bearer challenge nonce proof login secret",
+    blocks: [
+      { type: "paragraph", text: "Merchant API endpoints accept the HTTP session cookie created by wallet sign-in or an active server-side merchant API key as Authorization: Bearer wzp_.... Browser requests to this site use credentials: include. Connecting a wallet by itself does not authenticate those requests." },
       { type: "steps", items: [{ title: "Request a challenge", text: "POST /api/v1/auth/challenge with accountId, networkId, a fresh state value and purpose: login. Onboarding and payout changes use their own purposes and bound profile fields." }, { title: "Sign the returned message", text: "Use the returned message, recipient and decoded nonce in the selected wallet’s NEP-413 signMessage call. Preserve the exact state and network; reject mismatches." }, { title: "Exchange the proof", text: "POST /api/v1/auth/login with accountId, networkId, publicKey, signature, message, nonce and state. The backend verifies the proof and creates the session cookie. Use the project’s authentication helpers to perform this flow." }] },
       { type: "code", title: "Read your merchant profile", language: "JavaScript", code: `const response = await fetch("/api/v1/me", {
   credentials: "include",
@@ -322,6 +379,8 @@ export function verifyWorldzWebhook(rawBody, signature, secret) {
 // Verify first, then parse JSON and process the event idempotently.` },
       { type: "paragraph", text: "The deployment operator configures WEBHOOK_SIGNING_SECRET and must provide it to the receiving integration through a secure channel. The merchant Settings page does not reveal this secret. Verify the signature, match merchantId and orderId to your own order, require verified settlement, and record the event ID before fulfilling once." },
       { type: "paragraph", text: "Delivery metadata and last errors are available in GET /api/v1/me/deliveries. Receipt enrichment adds payer names and descriptions to merchant history; do not assume those off-chain fields are included in the original webhook event payload." },
+      { type: "paragraph", text: "A delivered state records that the sender received a successful HTTP response. Also retain the matching receiver-side signature verification and accepted event when claiming webhook acceptance. If delivery is pending or failed, inspect attempts and lastError; automatic retries stop at 10 attempts. Payment settlement remains valid independently of notification delivery." },
+      { type: "links", items: [{ label: "Configure an external storefront", href: "#storefront-configuration" }] },
     ],
   },
   {

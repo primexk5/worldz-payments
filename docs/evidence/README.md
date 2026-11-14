@@ -79,6 +79,96 @@ The signer-update and failed-payment transactions in the recovery documentation
 are useful diagnostics; neither is a successful checkout proof. The router upgrade
 snapshot likewise establishes proposal state, not completed merchant settlement.
 
+## Storefront product checkout
+
+**Status: the 0.03 NEAR testnet payment is verified against the authenticated
+merchant API, finalized router event/state and the merchant-provided receipt.
+The merchant identified the standalone storefront as the initiating website.**
+
+The user supplied both screenshots below and requested publication as evidence.
+They are copied unchanged, with dimensions and SHA-256 hashes recorded in
+[`storefront-payment.json`](storefront-payment.json). The receipt's transaction,
+settlement reference, network, gross, fee, net and payer/payout accounts match
+the independently read records. The product-page screenshot shows the
+**SecureKey Hardware Wallet** and its **Pay with NEAR** button; the user stated
+that this was where the payment was tested. The original browser session and
+wallet approval were not independently observed.
+
+| Field | Exact observation |
+| --- | --- |
+| Product | 1 × SecureKey Hardware Wallet |
+| Network / router | Testnet / `router.newking.testnet` |
+| Settlement receipt block | 277634878 · 14 November 2026, 08:53:16.623902 UTC |
+| Gross | 0.03 NEAR · `30000000000000000000000` yoctoNEAR |
+| Fee | 0.00009 NEAR · `90000000000000000000` yoctoNEAR |
+| Merchant net | 0.02991 NEAR · `29910000000000000000000` yoctoNEAR |
+| Payer / payout account | `drytea4617.testnet` / `luckytag417.testnet` |
+| Fee recipient | `newking.testnet` |
+| Order ID | `ord_e46c0409e04e4f52ae295e988dbd4d28` |
+| Transaction | [CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE](https://testnet.nearblocks.io/txns/CvsZPAg47KKaNKyHayJuvywG7YukFkyYHcaBHo12afUE) |
+| Settlement receipt | `5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo` |
+| Event ID | `testnet:router.newking.testnet:5BkicR6RqDZtpguRcUZ7jADxZQepxFXqvJB8kWCr78wo:1` |
+| Router result | `SETTLED`; merchant and fee legs `succeeded` |
+
+The authenticated `GET /api/v1/me/deliveries` observation at 08:59:40 UTC
+matched the exact order, transaction, settlement receipt and amounts, with
+`state: SETTLED`. Customer name and unrelated merchant activity were omitted
+from the published API extract. No API key, signed webhook body, signature,
+session cookie or checkout capability is included.
+
+Public read-only verification used
+`https://archival-rpc.testnet.fastnear.com`. The finalized transaction's
+`pay_native` action, attached deposit, signed payment terms and successful
+router `payment_settled` event matched the API record. The order replay key was
+recomputed from the original authorization using the protocol's Borsh replay
+domain. A finalized `get_order` query at block 277635774 returned the same
+`SETTLED` order and succeeded merchant/fee legs. The query parameters and
+verification time are in the JSON record for reproduction. This trusts the
+configured RPC; it is not a light-client proof or a check of deployed bytecode.
+
+![Standalone storefront identified by the merchant as the source of the payment](screenshots/storefront-product-page.png)
+
+![Merchant receipt for the matching 0.03 NEAR storefront payment](screenshots/storefront-settlement-dashboard.png)
+
+### Storefront webhook status
+
+The user reported **“webhook payments works.”** Independent sender observations
+for that exact event on **14 November 2026** show:
+
+| Observed at (UTC) | Sender state | Attempts | Last error |
+| --- | --- | --- | --- |
+| 08:59:40 | `pending` | 8 | Not captured in this initial extract |
+| 09:12:39 | `failed` | 10 | Receiver returned HTTP 404 |
+
+Both observations are retained in the JSON record. No matching receiver-side
+accepted log, raw-body signature-verification result or successful sender
+delivery result was captured. The evidence establishes settlement and the
+authenticated merchant record; **successful webhook delivery is not
+established for this run**. HTTP 404 indicates that the configured receiving
+URL was not found. Verify the deployed receiver's hostname and route; the
+external storefront uses `/api/webhooks/worldz`, while the separate
+WorldzPayments website sample uses `/webhooks/worldz`.
+
+This is a dated observation, not a claim that delivery can never succeed.
+To extend the evidence, capture a later `delivered` result for the same event
+and a matching accepted/signature-verified receiver record. Preserve any
+intermediate pending/failed observations. Investigate the saved callback path,
+secret, response code and persistent storage without sending another payment
+just to repair the notification. See the
+[developer configuration guide](../storefront-integration.md).
+
+The automatic sender exhausted its 10 attempts. Fixing the endpoint alone does
+not establish a subsequent delivery of this historical event; use the
+deployment's replay/requeue process and capture the resulting receiver and
+sender evidence before updating its status.
+
+The source revisions inspected are recorded in the JSON; deployed frontend and
+backend commits and router code hash were not independently verified. The
+standalone shop is in the [Shopify-named repository](https://github.com/primexk5/Shopify),
+but no native Shopify order synchronization, inventory fulfilment, successful
+sender retry, or live duplicate/tamper result is established by these captures.
+The screenshots are supplied evidence; their capture UTC timestamps are unknown.
+
 ## Cross-chain sandbox evidence
 
 Cross-chain checkout has a simulation mode so wallet selection, quotes, attempt
